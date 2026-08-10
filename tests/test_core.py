@@ -501,6 +501,31 @@ class TestTrades(unittest.TestCase):
         self.assertFalse(result["legal"])
         self.assertTrue(any("uneven" in v for v in result["violations"]))
 
+    def test_preexisting_roster_holes_do_not_block_an_unrelated_trade(self):
+        """Regression: a roster that already could not field a lineup was
+        blocked from every trade, including ones that had nothing to do with
+        the gap. Bye weeks and injuries are exactly when trading matters."""
+        short_a = [p for p in self.a if p.pos not in ("K", "TE")]   # no K, no TE
+        short_b = [p for p in self.b if p.pos not in ("K", "TE")]
+        self.assertIn("K", unfilled_slots(short_a, self.cfg))
+
+        result = trades.evaluate(
+            self.cfg, short_a, short_b,
+            [p for p in short_a if p.name == "A RB4"],
+            [p for p in short_b if p.name == "B WR3"],
+        )
+        self.assertTrue(result["legal"], result["violations"])
+
+    def test_a_trade_that_creates_a_hole_is_still_refused(self):
+        """The rule still has teeth: trading away your only QB is illegal."""
+        result = trades.evaluate(
+            self.cfg, self.a, self.b,
+            [p for p in self.a if p.pos == "QB"],
+            [p for p in self.b if p.name == "B WR3"],
+        )
+        self.assertFalse(result["legal"])
+        self.assertTrue(any("unable to start" in v for v in result["violations"]))
+
     def test_untouchable_position_blocks_the_deal(self):
         self.cfg["trades"]["untouchable_positions"] = ["QB"]
         result = trades.evaluate(self.cfg, self.a, self.b, [self.a[0]], [self.b[3]])

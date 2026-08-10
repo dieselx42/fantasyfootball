@@ -76,7 +76,9 @@ def evaluate(
     biggest = max(abs(a_out), abs(b_out), 1.0)
     gap_pct = round(abs(a_out - b_out) / biggest * 100, 1)
 
-    legality = check_legality(cfg, a_sends, b_sends, a_after, b_after, week)
+    legality = check_legality(
+        cfg, a_sends, b_sends, team_a_roster, a_after, team_b_roster, b_after, week
+    )
     fairness = _fairness(cfg)
     min_gain = float(fairness.get("min_value_gain", 0.0))
 
@@ -162,7 +164,9 @@ def check_legality(
     cfg: Mapping[str, Any],
     a_sends: Sequence[Player],
     b_sends: Sequence[Player],
+    a_before: Sequence[Player],
     a_after: Sequence[Player],
+    b_before: Sequence[Player],
     b_after: Sequence[Player],
     week: int | None = None,
 ) -> dict[str, Any]:
@@ -186,11 +190,26 @@ def check_legality(
             violations.append(f"Your roster would hold {len(a_after)} of {capacity}.")
         if len(b_after) > capacity:
             violations.append(f"Their roster would hold {len(b_after)} of {capacity}.")
-        for label, roster in (("Your", a_after), ("Their", b_after)):
-            holes = unfilled_slots(roster, cfg)
-            if holes:
-                pretty = ", ".join(f"{n}x {slot}" for slot, n in holes.items())
-                violations.append(f"{label} roster could not field a lineup ({pretty}).")
+        # Only holes the trade *creates* count against it. A roster that
+        # already cannot field a lineup — bye weeks, injuries, a dropped
+        # kicker — must still be allowed to trade its way out of trouble,
+        # and that is exactly when trading matters most.
+        for label, before, after in (
+            ("Your", a_before, a_after),
+            ("Their", b_before, b_after),
+        ):
+            existing = unfilled_slots(before, cfg)
+            resulting = unfilled_slots(after, cfg)
+            worsened = {
+                slot: count
+                for slot, count in resulting.items()
+                if count > existing.get(slot, 0)
+            }
+            if worsened:
+                pretty = ", ".join(f"{n}x {slot}" for slot, n in worsened.items())
+                violations.append(
+                    f"{label} roster would be left unable to start ({pretty})."
+                )
 
     untouchable = set(rules.get("untouchable_positions") or [])
     for player in list(a_sends) + list(b_sends):
