@@ -1,0 +1,16 @@
+# Local state — your drafts, rosters and league data live here.
+data/*.db
+data/*.db-journal
+data/projections/*.csv
+!data/projections/sample_projections.csv
+
+# Secrets (platform API tokens)
+secrets/
+*.token.json
+.env
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store

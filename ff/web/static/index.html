@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fantasy Assistant</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">Fantasy&nbsp;Assistant</div>
+  <nav id="nav" class="tabs" hidden>
+    <button data-view="draft" class="tab">Draft</button>
+    <button data-view="team" class="tab">My Team</button>
+    <button data-view="trades" class="tab">Trades</button>
+    <button data-view="players" class="tab">Players</button>
+    <button data-view="settings" class="tab">League</button>
+  </nav>
+  <div class="spacer"></div>
+  <select id="leaguePicker" class="league-picker" hidden></select>
+</header>
+
+<main id="main"></main>
+
+<div id="toast" class="toast" hidden></div>
+
+<!-- ===================== SETUP WIZARD ===================== -->
+<template id="tpl-setup">
+  <section class="wizard">
+    <h1>Set up your league</h1>
+    <p class="lede">Everything here is saved to a plain JSON file you can edit,
+       copy, or hand to someone in another league.</p>
+
+    <ol class="steps">
+      <li class="step" data-step="1">
+        <h2><span class="num">1</span> Where does your league live?</h2>
+        <div id="platformList" class="platform-grid"></div>
+        <div id="platformFields" class="fields"></div>
+        <div id="yahooAuth" class="yahoo-auth" hidden>
+          <p class="hint">Yahoo needs a free developer app. Create one at
+            <a href="https://developer.yahoo.com/apps/" target="_blank" rel="noreferrer">developer.yahoo.com/apps</a>
+            with redirect URI <code>oob</code> and Fantasy Sports read access.</p>
+          <button id="btnAuthUrl" class="btn ghost" type="button">Get authorization link</button>
+          <div id="authUrlBox" hidden>
+            <a id="authUrl" target="_blank" rel="noreferrer" class="authlink"></a>
+            <label>Paste the code Yahoo shows you
+              <input id="yahooCode" type="text" placeholder="Authorization code">
+            </label>
+            <button id="btnExchange" class="btn" type="button">Connect</button>
+          </div>
+        </div>
+      </li>
+
+      <li class="step" data-step="2">
+        <h2><span class="num">2</span> League basics</h2>
+        <div class="fields">
+          <label>League name <input id="fName" type="text" placeholder="Sunday Sickos"></label>
+          <label>Number of teams <input id="fTeams" type="number" min="2" max="32" value="12"></label>
+          <label>Scoring
+            <select id="fPpr">
+              <option value="0.5">Half PPR (0.5 per reception)</option>
+              <option value="1">Full PPR (1 per reception)</option>
+              <option value="0">Standard (no PPR)</option>
+            </select>
+          </label>
+          <label>Draft rounds <input id="fRounds" type="number" min="1" max="40" value="15"></label>
+        </div>
+      </li>
+
+      <li class="step" data-step="3">
+        <h2><span class="num">3</span> Teams and managers</h2>
+        <p class="hint">One row per team. You can pull these from your platform later.</p>
+        <div id="teamRows" class="team-rows"></div>
+        <button id="btnAddTeam" class="btn ghost" type="button">+ Add team</button>
+      </li>
+    </ol>
+
+    <div id="setupProblems" class="problems" hidden></div>
+    <button id="btnCreate" class="btn primary big" type="button">Create league</button>
+  </section>
+</template>
+
+<!-- ===================== DRAFT ===================== -->
+<template id="tpl-draft">
+  <section class="draft">
+    <div class="draft-head">
+      <div id="clock" class="clock"></div>
+      <div class="draft-actions">
+        <select id="draftTeam" class="sel"></select>
+        <button id="btnUndo" class="btn ghost" type="button">Undo</button>
+        <button id="btnReset" class="btn danger ghost" type="button">Reset</button>
+      </div>
+    </div>
+
+    <div id="noProjections" class="empty" hidden>
+      <h3>No projections loaded</h3>
+      <p>The board needs player projections before it can recommend anything.
+         Import a CSV under <b>League &rsaquo; Projections</b>.</p>
+    </div>
+
+    <div class="draft-grid">
+      <div class="panel">
+        <h3>Recommended for <span id="recTeam"></span></h3>
+        <div id="recs" class="recs"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Available <input id="search" class="search" type="search" placeholder="Search players"></h3>
+        <div class="poschips" id="posChips"></div>
+        <div id="avail" class="avail"></div>
+      </div>
+
+      <div class="panel side">
+        <h3>Positional cliffs</h3>
+        <div id="scarcity" class="scarcity"></div>
+        <h3>Your roster</h3>
+        <div id="myRoster" class="roster"></div>
+        <h3>Recent picks</h3>
+        <div id="recent" class="recent"></div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<!-- ===================== SIMPLE VIEWS ===================== -->
+<template id="tpl-team">
+  <section class="stack">
+    <h1>My Team</h1>
+    <select id="teamPicker" class="sel"></select>
+    <div class="panel"><h3>Optimal lineup <span id="lineupTotal" class="pill"></span></h3>
+      <div id="lineup" class="lineup"></div></div>
+    <div class="panel"><h3>Bench</h3><div id="benchList" class="roster"></div></div>
+  </section>
+</template>
+
+<template id="tpl-trades">
+  <section class="stack">
+    <h1>Trades</h1>
+    <p class="lede">Suggestions respect your league's configured trade rules —
+      deadline, package size, and how lopsided a deal can be before it gets vetoed.</p>
+    <div class="row">
+      <select id="tradeTeam" class="sel"></select>
+      <button id="btnSuggest" class="btn primary" type="button">Suggest trades</button>
+    </div>
+    <div id="tradeList" class="trades"></div>
+  </section>
+</template>
+
+<template id="tpl-players">
+  <section class="stack">
+    <h1>Player values</h1>
+    <p class="lede">Scored with <b>your</b> league's rules, then converted to value
+      over replacement so positions are comparable.</p>
+    <div class="row">
+      <input id="pSearch" class="search" type="search" placeholder="Search">
+      <div class="poschips" id="pChips"></div>
+    </div>
+    <div id="playerTable"></div>
+  </section>
+</template>
+
+<template id="tpl-settings">
+  <section class="stack">
+    <h1>League settings</h1>
+    <div class="panel">
+      <h3>Projections</h3>
+      <p class="hint">Drop in a CSV from any source. Column names are matched
+        loosely, so most exports work as-is. Rows are re-scored with your rules.</p>
+      <input id="csvFile" type="file" accept=".csv,text/csv">
+      <div id="fileList" class="filelist"></div>
+    </div>
+    <div class="panel">
+      <h3>Scoring</h3>
+      <p class="hint">Points per unit. Blank or zero means the stat is ignored.</p>
+      <div id="scoringEditor" class="scoring"></div>
+    </div>
+    <div class="panel">
+      <h3>Roster slots</h3>
+      <div id="rosterEditor" class="slots"></div>
+    </div>
+    <div class="panel">
+      <h3>Trade rules</h3>
+      <div id="tradeEditor" class="fields"></div>
+    </div>
+    <div class="panel">
+      <h3>Teams</h3>
+      <div id="teamEditor" class="team-rows"></div>
+      <label class="inline">My team
+        <select id="myTeam" class="sel"></select>
+      </label>
+    </div>
+    <div id="saveProblems" class="problems" hidden></div>
+    <button id="btnSave" class="btn primary big" type="button">Save league</button>
+  </section>
+</template>
+
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "id": "example-league",
+  "name": "Example League",
+  "season": 2025,
+  "platform": {
+    "kind": "yahoo",
+    "league_id": "",
+    "settings": {
+      "league_id": ""
+    }
+  },
+  "team_count": 12,
+  "scoring": {
+    "pass_yd": 0.04,
+    "pass_td": 4,
+    "pass_int": -2,
+    "pass_2pt": 2,
+    "rush_yd": 0.1,
+    "rush_td": 6,
+    "rush_2pt": 2,
+    "rec": 0.5,
+    "rec_yd": 0.1,
+    "rec_td": 6,
+    "rec_2pt": 2,
+    "fum_lost": -2,
+    "ret_td": 6,
+    "fg_0_19": 3,
+    "fg_20_29": 3,
+    "fg_30_39": 3,
+    "fg_40_49": 4,
+    "fg_50p": 5,
+    "fg_miss": -1,
+    "xp_made": 1,
+    "xp_miss": -1,
+    "dst_sack": 1,
+    "dst_int": 2,
+    "dst_fum_rec": 2,
+    "dst_td": 6,
+    "dst_safety": 2,
+    "dst_block": 2
+  },
+  "scoring_bonuses": [
+    {
+      "stat": "pass_yd",
+      "threshold": 300,
+      "points": 3
+    },
+    {
+      "stat": "rush_yd",
+      "threshold": 100,
+      "points": 3
+    },
+    {
+      "stat": "rec_yd",
+      "threshold": 100,
+      "points": 3
+    }
+  ],
+  "roster": {
+    "slots": [
+      {
+        "slot": "QB",
+        "count": 1,
+        "eligible": [
+          "QB"
+        ]
+      },
+      {
+        "slot": "RB",
+        "count": 2,
+        "eligible": [
+          "RB"
+        ]
+      },
+      {
+        "slot": "WR",
+        "count": 2,
+        "eligible": [
+          "WR"
+        ]
+      },
+      {
+        "slot": "TE",
+        "count": 1,
+        "eligible": [
+          "TE"
+        ]
+      },
+      {
+        "slot": "FLEX",
+        "count": 1,
+        "eligible": [
+          "RB",
+          "WR",
+          "TE"
+        ]
+      },
+      {
+        "slot": "K",
+        "count": 1,
+        "eligible": [
+          "K"
+        ]
+      },
+      {
+        "slot": "DST",
+        "count": 1,
+        "eligible": [
+          "DST"
+        ]
+      }
+    ],
+    "bench": 6,
+    "ir": 1
+  },
+  "draft": {
+    "type": "snake",
+    "rounds": 15,
+    "seconds_per_pick": 90,
+    "order": [],
+    "auction_budget": 200
+  },
+  "valuation": {
+    "method": "vor",
+    "replacement": "auto",
+    "flex_share": {
+      "RB": 0.45,
+      "WR": 0.45,
+      "TE": 0.1
+    },
+    "scarcity_weight": 1.0,
+    "need_weight": 0.25,
+    "tier_break_sensitivity": 1.0
+  },
+  "trades": {
+    "approval": "league_vote",
+    "veto_votes_required": 4,
+    "review_period_hours": 24,
+    "deadline_week": 11,
+    "max_players_per_side": 3,
+    "allow_uneven": true,
+    "allow_draft_picks": false,
+    "allow_faab": false,
+    "enforce_roster_limits": true,
+    "fairness": {
+      "max_value_gap_pct": 15.0,
+      "require_both_improve": true,
+      "min_value_gain": 1.0
+    },
+    "untouchable_positions": []
+  },
+  "teams": [
+    {
+      "id": "gridiron-gang",
+      "name": "Gridiron Gang",
+      "manager": "Phillip"
+    },
+    {
+      "id": "bear-down",
+      "name": "Bear Down",
+      "manager": "Sam"
+    },
+    {
+      "id": "turf-wars",
+      "name": "Turf Wars",
+      "manager": "Alex"
+    },
+    {
+      "id": "hail-mary",
+      "name": "Hail Mary",
+      "manager": "Jordan"
+    },
+    {
+      "id": "blitz-brigade",
+      "name": "Blitz Brigade",
+      "manager": "Casey"
+    },
+    {
+      "id": "end-zone-elite",
+      "name": "End Zone Elite",
+      "manager": "Riley"
+    },
+    {
+      "id": "pocket-passers",
+      "name": "Pocket Passers",
+      "manager": "Morgan"
+    },
+    {
+      "id": "red-zone-rebels",
+      "name": "Red Zone Rebels",
+      "manager": "Taylor"
+    },
+    {
+      "id": "sack-masters",
+      "name": "Sack Masters",
+      "manager": "Jamie"
+    },
+    {
+      "id": "play-action",
+      "name": "Play Action",
+      "manager": "Drew"
+    },
+    {
+      "id": "two-minute-drill",
+      "name": "Two Minute Drill",
+      "manager": "Quinn"
+    },
+    {
+      "id": "fourth-and-long",
+      "name": "Fourth And Long",
+      "manager": "Avery"
+    }
+  ],
+  "my_team_id": "gridiron-gang"
+}
