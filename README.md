@@ -105,6 +105,58 @@ Deals that exceed your league's configured fairness gap are marked **veto
 risk** and sorted below cleaner offers — a bigger gain you can never get
 approved is worth less than a smaller one you can.
 
+## The League tab
+
+Everything about a league is entered and edited here — nothing is hardcoded,
+so setting up a second league for a different group is the same work as the
+first:
+
+- **League info** — name, season, platform, platform league ID
+- **Draft schedule** — date, time, UTC offset, timezone label, how early to
+  arrive, location, notes, draft type, rounds, seconds per pick
+- **Draft order** — round 1 order, reorderable; snake reverses it each round
+- **Scoring** — every stat, grouped, with per-unit values
+- **Scoring bonuses** — yardage thresholds, stackable
+- **Points-allowed bands** — defense scoring by band
+- **Roster slots** and bench size
+- **Waivers and playoffs** — type, timing, playoff field and weeks
+- **Trade rules** — approval, deadline, package size, fairness gap
+- **Teams and managers**, and which one is yours
+
+A live countdown to the draft sits in the header on every screen. The time is
+stored with its UTC offset, because a draft time without a timezone is the
+easiest possible way to miss a draft.
+
+### Scoring that multipliers can't express
+
+Two kinds of rule need more than a points-per-unit number, and both are
+configurable:
+
+**Stacking bonuses.** Yahoo writes passing yards as "50 yards per point;
+3 points at 300 yards; 4 points at 400 yards". That is `pass_yd: 0.02` plus two
+bonus rows. They stack — a 400-yard game earns both, for +7.
+
+**Banded stats.** Defensive points allowed is a lookup, not a multiplier: 0
+allowed scores 10, 1–6 scores 7, and so on. `scoring_bands` holds an ascending
+list of `{"max": <inclusive bound>, "points": n}` ending in an open-ended band:
+
+```jsonc
+"scoring_bands": {
+  "dst_pa": [
+    { "max": 0,    "points": 10 },
+    { "max": 6,    "points": 7  },
+    { "max": 13,   "points": 4  },
+    { "max": 20,   "points": 2  },
+    { "max": 27,   "points": 0  },
+    { "max": 34,   "points": -1 },
+    { "max": null, "points": -4 }
+  ]
+}
+```
+
+Validation rejects a band list that does not end open-ended, since otherwise
+some values would silently score nothing.
+
 ## Changing the rules
 
 Everything below is editable in the UI (**League** tab) and lives in
@@ -135,8 +187,14 @@ Everything below is editable in the UI (**League** tab) and lives in
 }
 ```
 
-`leagues/example-league.json` is a filled-in 12-team half-PPR config with
-yardage bonuses and a league-vote trade policy — copy it as a starting point.
+Two configs ship as references:
+
+- `leagues/example-league.json` — a generic 12-team half-PPR league.
+- `leagues/keg-south.json` — a real 10-team Yahoo league, useful precisely
+  because its rules are *not* standard: 6-point passing TDs, full PPR,
+  yards-per-point scoring, tiered field-goal misses, and banded points
+  allowed. If a change breaks nothing in the example league but breaks this
+  one, the change was wrong.
 
 To support a stat nobody has needed yet, add it to `ff/scoring_vocab.py`. It
 then appears in the scoring editor and works everywhere; no other file changes.

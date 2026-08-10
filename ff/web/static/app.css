@@ -85,7 +85,8 @@ input[type=text], input[type=number], input[type=search], select {
 }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .pill { background: var(--panel-2); border: 1px solid var(--line);
-        border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--text); }
+        border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--text);
+        text-transform: none; letter-spacing: 0; }
 .problems { background: #2d1618; border: 1px solid var(--bad);
             color: #ffb3ae; padding: 12px 14px; border-radius: 8px; margin: 14px 0; font-size: 14px; }
 .problems ul { margin: 6px 0 0; padding-left: 20px; }
@@ -191,6 +192,42 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
            background: var(--panel-2); padding: 8px 12px; border-radius: 8px; }
 .filerow button { margin-left: auto; background: none; border: 0; color: var(--dim); cursor: pointer; }
 .filerow button:hover { color: var(--bad); }
+
+/* ---------- draft countdown ---------- */
+.draft-countdown {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 6px 14px; font-size: 13px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.draft-countdown b { color: var(--accent); }
+.cd-label { color: var(--dim); }
+.draft-countdown.soon { border-color: var(--warn); }
+.draft-countdown.soon b { color: var(--warn); }
+.draft-countdown.live { border-color: var(--good); color: var(--good); font-weight: 600; }
+
+/* ---------- draft order ---------- */
+.order { display: flex; flex-direction: column; gap: 6px; }
+.order-row {
+  display: grid; grid-template-columns: 34px 1fr auto auto; gap: 10px;
+  align-items: center; background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px;
+}
+.order-row .order-num {
+  display: grid; place-items: center; width: 24px; height: 24px;
+  border-radius: 6px; background: var(--panel); color: var(--dim); font-size: 12px;
+}
+.order-row .btn { padding: 2px 9px; line-height: 1.4; }
+
+/* ---------- scoring bands ---------- */
+.bands { display: flex; flex-direction: column; gap: 6px; }
+.band-row {
+  display: grid; grid-template-columns: 1fr 110px auto; gap: 10px; align-items: center;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 12px;
+}
+.band-row input { margin-top: 0; }
+.band-row .meta { color: var(--dim); font-size: 13px; }
 
 /* ---------- toast ---------- */
 .toast {

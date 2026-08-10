@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from .scoring_vocab import is_stat
 
@@ -142,6 +143,9 @@ def new_config(
         "team_count": team_count,
         "scoring": default_scoring(ppr),
         "scoring_bonuses": [],
+        # Stats scored by lookup table instead of per-unit multiplier, e.g.
+        # defensive points allowed. See ff.scoring.band_points.
+        "scoring_bands": {},
         "roster": default_roster(),
         "draft": {
             "type": "snake",             # snake | linear | auction
@@ -149,11 +153,54 @@ def new_config(
             "seconds_per_pick": 90,
             "order": [],                 # list of team ids; empty = order of `teams`
             "auction_budget": 200,
+            # When the draft actually happens. Stored as an ISO 8601 string
+            # *with an offset* so it is unambiguous — a draft time without a
+            # timezone is the single easiest way to miss a draft.
+            "scheduled_at": None,        # e.g. "2026-08-30T17:45:00-04:00"
+            "timezone": "",              # display label, e.g. "EDT"
+            "arrive_minutes_early": 10,
+            "location": "",              # "Online — Yahoo", a bar, someone's house
+            "notes": "",
         },
         "valuation": default_valuation(),
         "trades": default_trade_rules(),
+        "waivers": default_waivers(),
+        "playoffs": default_playoffs(),
+        "settings_misc": default_misc(),
         "teams": [],
         "my_team_id": None,
+    }
+
+
+def default_waivers() -> dict[str, Any]:
+    return {
+        "type": "continual_rolling",   # continual_rolling | faab | reverse_standings
+        "waiver_days": 1,
+        "process": "",                 # free text, e.g. "Game Time - Tuesday"
+        "post_draft_players": "free_agents",
+        "faab_budget": 100,
+        "max_acquisitions_season": None,
+        "max_acquisitions_week": None,
+    }
+
+
+def default_playoffs() -> dict[str, Any]:
+    return {
+        "teams": 6,
+        "weeks": [15, 16, 17],
+        "reseed": True,
+        "tiebreaker": "higher_seed",
+    }
+
+
+def default_misc() -> dict[str, Any]:
+    return {
+        "scoring_type": "head_to_head",
+        "start_scoring_week": 1,
+        "fractional_points": True,
+        "negative_points": True,
+        "divisions": False,
+        "play_against_median": False,
     }
 
 
@@ -195,6 +242,24 @@ def validate(cfg: dict[str, Any]) -> list[str]:
             elif not isinstance(value, (int, float)):
                 problems.append(f"Scoring value for '{key}' must be a number.")
 
+    for stat, bands in (cfg.get("scoring_bands") or {}).items():
+        if not is_stat(stat):
+            problems.append(f"Unknown banded stat '{stat}'.")
+        if not isinstance(bands, list) or not bands:
+            problems.append(f"Bands for '{stat}' must be a non-empty list.")
+            continue
+        for band in bands:
+            if not isinstance(band.get("points"), (int, float)):
+                problems.append(f"Band for '{stat}': points must be a number.")
+            ceiling = band.get("max")
+            if ceiling is not None and not isinstance(ceiling, (int, float)):
+                problems.append(f"Band for '{stat}': max must be a number or null.")
+        if bands[-1].get("max") is not None:
+            problems.append(
+                f"Bands for '{stat}' need a final open-ended band (max: null) "
+                f"so every value scores."
+            )
+
     for i, bonus in enumerate(cfg.get("scoring_bonuses") or []):
         where = f"Bonus #{i + 1}"
         if not is_stat(bonus.get("stat", "")):
@@ -229,6 +294,11 @@ def validate(cfg: dict[str, Any]) -> list[str]:
         problems.append("Draft type must be snake, linear or auction.")
     if not isinstance(draft.get("rounds"), int) or draft["rounds"] < 1:
         problems.append("Draft rounds must be at least 1.")
+    if draft.get("scheduled_at") and parse_draft_time(draft["scheduled_at"]) is None:
+        problems.append(
+            "Draft date/time could not be read. Use a full date and time, "
+            "e.g. 2026-08-30T17:45:00-04:00."
+        )
 
     # --- teams -----------------------------------------------------------
     teams = cfg.get("teams") or []
@@ -266,6 +336,81 @@ def ensure_valid(cfg: dict[str, Any]) -> None:
     problems = validate(cfg)
     if problems:
         raise ConfigError("; ".join(problems))
+
+
+# --------------------------------------------------------------------------
+# Draft schedule
+# --------------------------------------------------------------------------
+
+def parse_draft_time(value: str | None) -> datetime | None:
+    """Read a stored draft time, or ``None`` if it cannot be understood.
+
+    Accepts what ``datetime.fromisoformat`` accepts plus a trailing ``Z``.
+    A value with no offset is treated as local time, which is what someone
+    typing into a date field means.
+    """
+    if not value:
+        return None
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def draft_schedule(cfg: Mapping[str, Any], now: datetime | None = None) -> dict[str, Any]:
+    """Everything the UI needs to show a draft countdown.
+
+    Returns ``scheduled`` False when no date is set, so callers can prompt for
+    one rather than rendering a broken clock.
+    """
+    draft = cfg.get("draft") or {}
+    when = parse_draft_time(draft.get("scheduled_at"))
+    if when is None:
+        return {"scheduled": False}
+
+    # A naive stored time means "local", so compare it against a naive now.
+    reference = now or (
+        datetime.now(when.tzinfo) if when.tzinfo else datetime.now()
+    )
+    if when.tzinfo and reference.tzinfo is None:
+        reference = reference.replace(tzinfo=when.tzinfo)
+    elif when.tzinfo is None and reference.tzinfo is not None:
+        when = when.replace(tzinfo=reference.tzinfo)
+
+    seconds = int((when - reference).total_seconds())
+    arrive_early = int(draft.get("arrive_minutes_early") or 0)
+
+    return {
+        "scheduled": True,
+        "iso": when.isoformat(),
+        "label": when.strftime("%A, %b %-d %Y at %-I:%M %p").replace(" 0", " "),
+        "timezone": draft.get("timezone") or "",
+        "location": draft.get("location") or "",
+        "notes": draft.get("notes") or "",
+        "arrive_minutes_early": arrive_early,
+        "arrive_by": (when - timedelta(minutes=arrive_early)).isoformat(),
+        "seconds_until": seconds,
+        "past": seconds < 0,
+        "countdown": humanize_countdown(seconds),
+    }
+
+
+def humanize_countdown(seconds: int) -> str:
+    if seconds < 0:
+        return "underway"
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes = rest // 60
+    parts = []
+    if days:
+        parts.append(f"{days} day{'s' if days != 1 else ''}")
+    if hours or days:
+        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+    return ", ".join(parts)
 
 
 # --------------------------------------------------------------------------
@@ -389,6 +534,9 @@ def migrate(cfg: dict[str, Any]) -> dict[str, Any]:
     for block, defaults in (
         ("valuation", default_valuation()),
         ("trades", default_trade_rules()),
+        ("waivers", default_waivers()),
+        ("playoffs", default_playoffs()),
+        ("settings_misc", default_misc()),
     ):
         merged = dict(defaults)
         merged.update(cfg.get(block) or {})

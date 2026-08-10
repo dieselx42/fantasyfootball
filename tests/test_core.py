@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from ff import config as C
 from ff import trades
 from ff.draft import DraftState, build_slots, recommend
 from ff.players import Player, make_player_id, normalize_name, parse_projection_csv
 from ff.roster import need_multiplier, optimal_lineup, unfilled_slots
-from ff.scoring import score_stats
+from ff.scoring import band_points, score_stats
 from ff.valuation import compute_values, depth_warnings, replacement_levels
 
 
@@ -88,6 +89,114 @@ class TestConfig(unittest.TestCase):
         cfg = league()
         cfg["scoring"]["not_a_real_stat"] = 5
         self.assertTrue(any("Unknown scoring stat" in p for p in C.validate(cfg)))
+
+
+class TestDraftSchedule(unittest.TestCase):
+    def test_countdown_matches_a_known_draft_time(self):
+        cfg = league()
+        cfg["draft"]["scheduled_at"] = "2026-08-30T17:45:00-04:00"
+        cfg["draft"]["timezone"] = "EDT"
+        cfg["draft"]["arrive_minutes_early"] = 10
+        now = datetime(2026, 8, 10, 10, 7, tzinfo=timezone(timedelta(hours=-4)))
+
+        schedule = C.draft_schedule(cfg, now)
+        self.assertTrue(schedule["scheduled"])
+        self.assertEqual(schedule["countdown"], "20 days, 7 hours, 38 minutes")
+        self.assertIn("Sunday", schedule["label"])
+        self.assertFalse(schedule["past"])
+        self.assertTrue(schedule["arrive_by"].endswith("17:35:00-04:00"))
+
+    def test_unscheduled_draft_is_reported_not_faked(self):
+        self.assertEqual(C.draft_schedule(league()), {"scheduled": False})
+
+    def test_a_draft_in_the_past_is_marked(self):
+        cfg = league()
+        cfg["draft"]["scheduled_at"] = "2020-09-01T20:00:00-04:00"
+        now = datetime(2026, 8, 10, tzinfo=timezone(timedelta(hours=-4)))
+        schedule = C.draft_schedule(cfg, now)
+        self.assertTrue(schedule["past"])
+        self.assertEqual(schedule["countdown"], "underway")
+
+    def test_unreadable_draft_time_fails_validation(self):
+        cfg = league()
+        cfg["draft"]["scheduled_at"] = "next Tuesday-ish"
+        self.assertTrue(any("Draft date/time" in p for p in C.validate(cfg)))
+
+    def test_timezone_offset_is_respected(self):
+        """The same wall-clock time in two zones is not the same instant."""
+        east, west = league(), league()
+        east["draft"]["scheduled_at"] = "2026-08-30T17:45:00-04:00"
+        west["draft"]["scheduled_at"] = "2026-08-30T17:45:00-07:00"
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        gap = (C.draft_schedule(west, now)["seconds_until"]
+               - C.draft_schedule(east, now)["seconds_until"])
+        self.assertEqual(gap, 3 * 3600)
+
+
+class TestScoringBands(unittest.TestCase):
+    PA_BANDS = [
+        {"max": 0, "points": 10}, {"max": 6, "points": 7}, {"max": 13, "points": 4},
+        {"max": 20, "points": 2}, {"max": 27, "points": 0}, {"max": 34, "points": -1},
+        {"max": None, "points": -4},
+    ]
+
+    def test_each_band_returns_its_own_value(self):
+        expected = [(0, 10), (6, 7), (7, 4), (13, 4), (17, 2), (24, 0), (30, -1), (45, -4)]
+        for allowed, points in expected:
+            self.assertEqual(band_points(allowed, self.PA_BANDS), points, f"PA={allowed}")
+
+    def test_banded_stat_is_looked_up_not_multiplied(self):
+        cfg = {"scoring": {"dst_sack": 1}, "scoring_bands": {"dst_pa": self.PA_BANDS}}
+        # 10 points allowed must score the band value (4), not 10 x anything.
+        self.assertEqual(score_stats({"dst_sack": 3, "dst_pa": 10}, cfg), 7.0)
+
+    def test_bands_must_end_open_ended(self):
+        cfg = league()
+        cfg["scoring_bands"] = {"dst_pa": [{"max": 20, "points": 2}]}
+        self.assertTrue(any("open-ended" in p for p in C.validate(cfg)))
+
+    def test_valid_bands_pass_validation(self):
+        cfg = league()
+        cfg["scoring_bands"] = {"dst_pa": self.PA_BANDS}
+        self.assertEqual(C.validate(cfg), [])
+
+
+class TestRealLeagueConfig(unittest.TestCase):
+    """The Keg South config is a real league; its unusual rules are a good
+    regression target for the whole scoring pipeline."""
+
+    def setUp(self):
+        self.cfg = C.load("keg-south")
+
+    def test_it_is_valid(self):
+        self.assertEqual(C.validate(self.cfg), [])
+
+    def test_yardage_bonuses_stack(self):
+        # 400 passing yards earns the 300 bonus (+3) and the 400 bonus (+4).
+        base = score_stats({"pass_yd": 400}, self.cfg)
+        self.assertAlmostEqual(base, 400 / 50 + 3 + 4, places=2)
+
+    def test_six_point_passing_touchdowns(self):
+        self.assertEqual(score_stats({"pass_td": 1}, self.cfg), 6.0)
+
+    def test_full_ppr(self):
+        self.assertEqual(score_stats({"rec": 10}, self.cfg), 10.0)
+
+    def test_defense_points_allowed_band(self):
+        self.assertEqual(score_stats({"dst_pa": 0}, self.cfg), 10.0)
+        self.assertEqual(score_stats({"dst_pa": 40}, self.cfg), -4.0)
+
+    def test_roster_is_nine_starters_and_six_bench(self):
+        starters = sum(s["count"] for s in self.cfg["roster"]["slots"])
+        self.assertEqual(starters, 9)
+        self.assertEqual(self.cfg["roster"]["bench"], 6)
+        self.assertEqual(C.roster_capacity(self.cfg), self.cfg["draft"]["rounds"])
+
+    def test_ten_teams_with_unique_ids(self):
+        ids = [t["id"] for t in self.cfg["teams"]]
+        self.assertEqual(len(ids), 10)
+        self.assertEqual(len(set(ids)), 10)
+        self.assertTrue(all(ids), "every team needs a non-empty id")
 
 
 class TestProjectionImport(unittest.TestCase):

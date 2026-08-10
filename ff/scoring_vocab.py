@@ -43,6 +43,7 @@ STAT_GROUPS: dict[str, list[tuple[str, str]]] = {
         ("fum_lost", "Fumble lost"),
         ("fum", "Fumble (any)"),
         ("ret_td", "Kick/punt return TD"),
+        ("off_fum_ret_td", "Offensive fumble return TD"),
         ("two_pt", "2PT conversion (generic)"),
     ],
     "Kicking": [
@@ -51,7 +52,12 @@ STAT_GROUPS: dict[str, list[tuple[str, str]]] = {
         ("fg_30_39", "FG made 30-39"),
         ("fg_40_49", "FG made 40-49"),
         ("fg_50p", "FG made 50+"),
-        ("fg_miss", "FG missed"),
+        ("fg_miss", "FG missed (any distance)"),
+        ("fg_miss_0_19", "FG missed 0-19"),
+        ("fg_miss_20_29", "FG missed 20-29"),
+        ("fg_miss_30_39", "FG missed 30-39"),
+        ("fg_miss_40_49", "FG missed 40-49"),
+        ("fg_miss_50p", "FG missed 50+"),
         ("xp_made", "Extra point made"),
         ("xp_miss", "Extra point missed"),
     ],
@@ -62,9 +68,18 @@ STAT_GROUPS: dict[str, list[tuple[str, str]]] = {
         ("dst_td", "Defensive/ST TD"),
         ("dst_safety", "Safety"),
         ("dst_block", "Blocked kick"),
+        ("dst_ret_td", "Kickoff/punt return TD"),
+        ("dst_xp_ret", "Extra point returned"),
         ("dst_pa", "Points allowed (per point)"),
         ("dst_ya", "Yards allowed (per yard)"),
     ],
+}
+
+#: Stats that carry a *raw total* used to look up a scoring band rather than
+#: being multiplied by a per-unit value. See ``config["scoring_bands"]``.
+BAND_STATS: dict[str, str] = {
+    "dst_pa": "Points allowed",
+    "dst_ya": "Yards allowed",
 }
 
 # Flat lookup: stat key -> human label.

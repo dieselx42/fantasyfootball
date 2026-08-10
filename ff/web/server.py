@@ -109,7 +109,8 @@ def create_league(api: Api, _params: dict[str, str], body: dict[str, Any]) -> An
 
 @route("GET", "/api/league/<league_id>")
 def get_league(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
-    return {"league": api.load_cfg(params["league_id"])}
+    cfg = api.load_cfg(params["league_id"])
+    return {"league": cfg, "schedule": cfgmod.draft_schedule(cfg)}
 
 
 @route("PUT", "/api/league/<league_id>")
@@ -302,6 +303,7 @@ def get_draft(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
         "picks": [p.to_dict() for p in state.slots],
         "teams": cfg.get("teams", []),
         "my_team_id": cfg.get("my_team_id"),
+        "schedule": cfgmod.draft_schedule(cfg),
     }
 
 

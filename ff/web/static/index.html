@@ -18,6 +18,7 @@
     <button data-view="settings" class="tab">League</button>
   </nav>
   <div class="spacer"></div>
+  <div id="draftClock" class="draft-countdown" hidden></div>
   <select id="leaguePicker" class="league-picker" hidden></select>
 </header>
 
@@ -163,6 +164,64 @@
 <template id="tpl-settings">
   <section class="stack">
     <h1>League settings</h1>
+
+    <div class="panel">
+      <h3>League info</h3>
+      <div class="fields">
+        <label>League name <input id="sName" type="text"></label>
+        <label>Season <input id="sSeason" type="number" min="2000" max="2100"></label>
+        <label>Platform
+          <select id="sPlatform"></select>
+        </label>
+        <label>Platform league ID
+          <input id="sLeagueKey" type="text" placeholder="from your league URL">
+        </label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Draft schedule <span id="sCountdown" class="pill"></span></h3>
+      <p class="hint">Store the date with its timezone so the countdown is never
+        ambiguous. The board uses this to tell you when to be ready.</p>
+      <div class="fields">
+        <label>Draft date &amp; time <input id="sWhen" type="datetime-local"></label>
+        <label>UTC offset
+          <select id="sOffset">
+            <option value="-04:00">EDT (UTC−4)</option>
+            <option value="-05:00">EST / CDT (UTC−5)</option>
+            <option value="-06:00">CST / MDT (UTC−6)</option>
+            <option value="-07:00">MST / PDT (UTC−7)</option>
+            <option value="-08:00">PST (UTC−8)</option>
+            <option value="-09:00">AKDT (UTC−9)</option>
+            <option value="-10:00">HST (UTC−10)</option>
+            <option value="+00:00">UTC</option>
+          </select>
+        </label>
+        <label>Timezone label <input id="sTzLabel" type="text" placeholder="EDT"></label>
+        <label>Arrive early (minutes) <input id="sArrive" type="number" min="0" max="120"></label>
+        <label>Where <input id="sWhere" type="text" placeholder="Online — Yahoo"></label>
+        <label>Draft type
+          <select id="sDraftType">
+            <option value="snake">Snake</option>
+            <option value="linear">Linear</option>
+            <option value="auction">Auction</option>
+          </select>
+        </label>
+        <label>Rounds <input id="sRounds" type="number" min="1" max="40"></label>
+        <label>Seconds per pick <input id="sClock" type="number" min="10" max="600"></label>
+      </div>
+      <label style="margin-top:12px">Notes
+        <input id="sNotes" type="text" placeholder="Anything else you need to remember">
+      </label>
+    </div>
+
+    <div class="panel">
+      <h3>Draft order</h3>
+      <p class="hint">The order for round 1. Snake drafts reverse it every round.
+        Leave untouched to use the team order below.</p>
+      <div id="orderEditor" class="order"></div>
+    </div>
+
     <div class="panel">
       <h3>Projections</h3>
       <p class="hint">Drop in a CSV from any source. Column names are matched
@@ -176,8 +235,44 @@
       <div id="scoringEditor" class="scoring"></div>
     </div>
     <div class="panel">
+      <h3>Scoring bonuses</h3>
+      <p class="hint">Extra points at a yardage threshold. Multiple thresholds
+        for the same stat stack — a 400-yard passing game earns both the 300
+        and the 400 bonus, matching how Yahoo awards them.</p>
+      <div id="bonusEditor" class="bands"></div>
+      <button id="btnAddBonus" class="btn ghost" type="button">+ Add bonus</button>
+    </div>
+
+    <div class="panel">
+      <h3>Points-allowed bands</h3>
+      <p class="hint">Defense scoring by band rather than per point. Each row is
+        an inclusive upper bound; the last row covers everything above it.</p>
+      <div id="bandEditor" class="bands"></div>
+    </div>
+
+    <div class="panel">
       <h3>Roster slots</h3>
       <div id="rosterEditor" class="slots"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Waivers &amp; playoffs</h3>
+      <div class="fields">
+        <label>Waiver type
+          <select id="wType">
+            <option value="continual_rolling">Continual rolling list</option>
+            <option value="faab">FAAB bidding</option>
+            <option value="reverse_standings">Reverse standings</option>
+          </select>
+        </label>
+        <label>Waiver days <input id="wDays" type="number" min="0" max="7"></label>
+        <label>Processing <input id="wProcess" type="text" placeholder="Game Time - Tuesday"></label>
+        <label>Playoff teams <input id="pTeams" type="number" min="0" max="16"></label>
+        <label>Playoff weeks <input id="pWeeks" type="text" placeholder="15, 16, 17"></label>
+        <label>Trade deadline (week)
+          <input id="tDeadline" type="number" min="0" max="18">
+        </label>
+      </div>
     </div>
     <div class="panel">
       <h3>Trade rules</h3>

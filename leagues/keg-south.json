@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "id": "keg-south",
+  "name": "Keg South Fantasy Fball League",
+  "season": 2026,
+  "platform": {
+    "kind": "yahoo",
+    "league_id": "184206",
+    "settings": {
+      "league_id": "184206",
+      "url": "https://football.fantasysports.yahoo.com/league/ksffl2011"
+    }
+  },
+  "team_count": 10,
+  "scoring": {
+    "pass_yd": 0.02,
+    "pass_td": 6,
+    "pass_int": -2,
+    "pass_2pt": 2,
+    "rush_yd": 0.05,
+    "rush_td": 6,
+    "rush_2pt": 2,
+    "rec": 1,
+    "rec_yd": 0.05,
+    "rec_td": 6,
+    "rec_2pt": 2,
+    "fum_lost": -2,
+    "ret_td": 6,
+    "off_fum_ret_td": 6,
+    "fg_0_19": 3,
+    "fg_20_29": 3,
+    "fg_30_39": 3,
+    "fg_40_49": 4,
+    "fg_50p": 5,
+    "fg_miss_0_19": -3,
+    "fg_miss_20_29": -2,
+    "fg_miss_30_39": -1,
+    "xp_made": 1,
+    "xp_miss": -3,
+    "dst_sack": 1,
+    "dst_int": 2,
+    "dst_fum_rec": 2,
+    "dst_td": 6,
+    "dst_safety": 2,
+    "dst_block": 2,
+    "dst_ret_td": 6,
+    "dst_xp_ret": 2
+  },
+  "scoring_bonuses": [
+    {
+      "stat": "pass_yd",
+      "threshold": 300,
+      "points": 3
+    },
+    {
+      "stat": "pass_yd",
+      "threshold": 400,
+      "points": 4
+    },
+    {
+      "stat": "rush_yd",
+      "threshold": 100,
+      "points": 3
+    },
+    {
+      "stat": "rush_yd",
+      "threshold": 200,
+      "points": 4
+    },
+    {
+      "stat": "rec_yd",
+      "threshold": 100,
+      "points": 3
+    },
+    {
+      "stat": "rec_yd",
+      "threshold": 200,
+      "points": 4
+    }
+  ],
+  "scoring_bands": {
+    "dst_pa": [
+      {
+        "max": 0,
+        "points": 10
+      },
+      {
+        "max": 6,
+        "points": 7
+      },
+      {
+        "max": 13,
+        "points": 4
+      },
+      {
+        "max": 20,
+        "points": 2
+      },
+      {
+        "max": 27,
+        "points": 0
+      },
+      {
+        "max": 34,
+        "points": -1
+      },
+      {
+        "max": null,
+        "points": -4
+      }
+    ]
+  },
+  "roster": {
+    "slots": [
+      {
+        "slot": "QB",
+        "count": 1,
+        "eligible": [
+          "QB"
+        ]
+      },
+      {
+        "slot": "RB",
+        "count": 2,
+        "eligible": [
+          "RB"
+        ]
+      },
+      {
+        "slot": "WR",
+        "count": 2,
+        "eligible": [
+          "WR"
+        ]
+      },
+      {
+        "slot": "TE",
+        "count": 1,
+        "eligible": [
+          "TE"
+        ]
+      },
+      {
+        "slot": "W/R/T",
+        "count": 1,
+        "eligible": [
+          "RB",
+          "WR",
+          "TE"
+        ]
+      },
+      {
+        "slot": "K",
+        "count": 1,
+        "eligible": [
+          "K"
+        ]
+      },
+      {
+        "slot": "DST",
+        "count": 1,
+        "eligible": [
+          "DST"
+        ]
+      }
+    ],
+    "bench": 6,
+    "ir": 0
+  },
+  "draft": {
+    "type": "snake",
+    "rounds": 15,
+    "seconds_per_pick": 105,
+    "order": [],
+    "auction_budget": 200,
+    "scheduled_at": "2026-08-30T17:45:00-04:00",
+    "timezone": "EDT",
+    "arrive_minutes_early": 10,
+    "location": "Online \u2014 Yahoo (Live Standard Draft)",
+    "notes": "Arrive 10 minutes early; the draft starts promptly at 5:45pm EDT."
+  },
+  "valuation": {
+    "method": "vor",
+    "replacement": "auto",
+    "flex_share": {
+      "RB": 0.45,
+      "WR": 0.45,
+      "TE": 0.1
+    },
+    "scarcity_weight": 1,
+    "need_weight": 0.25,
+    "tier_break_sensitivity": 1
+  },
+  "trades": {
+    "approval": "commissioner",
+    "veto_votes_required": 0,
+    "review_period_hours": 48,
+    "deadline_week": 12,
+    "max_players_per_side": 3,
+    "allow_uneven": true,
+    "allow_draft_picks": true,
+    "allow_faab": false,
+    "enforce_roster_limits": true,
+    "fairness": {
+      "max_value_gap_pct": 15,
+      "require_both_improve": true,
+      "min_value_gain": 1
+    },
+    "untouchable_positions": [],
+    "deadline_date": "2026-11-28",
+    "max_trades_per_season": null
+  },
+  "teams": [
+    {
+      "id": "diesel",
+      "name": "\u2620DIESEL\u2620",
+      "manager": ""
+    },
+    {
+      "id": "ruly-s-big-tymers",
+      "name": "Ruly's Big Tymers",
+      "manager": ""
+    },
+    {
+      "id": "baker-s-dirty-dozen",
+      "name": "Baker's Dirty Dozen",
+      "manager": ""
+    },
+    {
+      "id": "double-taylor-gators",
+      "name": "Double Taylor Gators",
+      "manager": ""
+    },
+    {
+      "id": "code-brown",
+      "name": "Code Brown",
+      "manager": ""
+    },
+    {
+      "id": "g-o-a-t-6x-champ",
+      "name": "G.O.A.T. 6X CHAMP",
+      "manager": ""
+    },
+    {
+      "id": "dracarys",
+      "name": "Dracarys",
+      "manager": ""
+    },
+    {
+      "id": "the-killer-ps",
+      "name": "The Killer Ps",
+      "manager": ""
+    },
+    {
+      "id": "rey-del-norte",
+      "name": "Rey del Norte",
+      "manager": ""
+    },
+    {
+      "id": "eat-meat",
+      "name": "EAT MEAT",
+      "manager": ""
+    }
+  ],
+  "my_team_id": "diesel",
+  "waivers": {
+    "type": "continual_rolling",
+    "waiver_days": 1,
+    "process": "Game Time - Tuesday",
+    "post_draft_players": "free_agents",
+    "faab_budget": 100,
+    "max_acquisitions_season": null,
+    "max_acquisitions_week": null
+  },
+  "playoffs": {
+    "teams": 6,
+    "weeks": [
+      15,
+      16,
+      17
+    ],
+    "reseed": true,
+    "tiebreaker": "higher_seed"
+  },
+  "settings_misc": {
+    "scoring_type": "head_to_head",
+    "start_scoring_week": 1,
+    "fractional_points": true,
+    "negative_points": true,
+    "divisions": false,
+    "play_against_median": false
+  }
+}

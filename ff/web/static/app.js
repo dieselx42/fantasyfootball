@@ -104,12 +104,76 @@ async function boot() {
 }
 
 async function loadLeague(id) {
-  const { league } = await api(`/api/league/${id}`);
+  const { league, schedule } = await api(`/api/league/${id}`);
   State.league = league;
+  State.schedule = schedule;
   $('#nav').hidden = false;
   $('#leaguePicker').hidden = false;
   $('#leaguePicker').value = id;
+  startCountdown();
   setView(league.teams?.length ? 'draft' : 'settings');
+}
+
+/* ------------------------------------------------------------------ *
+ * Draft countdown
+ *
+ * Ticks locally off the stored ISO timestamp rather than polling, so it
+ * stays accurate without hammering the server.
+ * ------------------------------------------------------------------ */
+
+let countdownTimer;
+
+function startCountdown() {
+  clearInterval(countdownTimer);
+  const box = $('#draftClock');
+  const iso = State.league?.draft?.scheduled_at;
+  if (!iso) { box.hidden = true; return; }
+
+  const target = new Date(iso);
+  if (Number.isNaN(target.getTime())) { box.hidden = true; return; }
+
+  const tick = () => {
+    const seconds = Math.floor((target - new Date()) / 1000);
+    box.hidden = false;
+    if (seconds <= 0) {
+      const elapsed = -seconds;
+      box.className = 'draft-countdown live';
+      box.textContent = elapsed < 6 * 3600
+        ? '● Draft is live'
+        : `Drafted ${target.toLocaleDateString()}`;
+      return;
+    }
+    box.className = 'draft-countdown' + (seconds < 3600 ? ' soon' : '');
+    box.replaceChildren(
+      el('span', { class: 'cd-label' }, 'Draft in'),
+      el('b', {}, formatCountdown(seconds)));
+    box.title = `${target.toLocaleString()} · ${State.league.draft.timezone || ''}`;
+  };
+
+  tick();
+  countdownTimer = setInterval(tick, 1000);
+}
+
+function formatCountdown(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (d) return `${d}d ${h}h ${m}m`;
+  if (h) return `${h}h ${m}m ${s}s`;
+  return `${m}m ${s}s`;
+}
+
+/** Split a stored ISO string into the value a datetime-local input wants
+ *  plus its offset, without letting the browser shift it into local time. */
+function splitIso(iso) {
+  const match = String(iso || '').match(
+    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2})?(Z|[+-]\d{2}:\d{2})?$/);
+  if (!match) return { local: '', offset: '-04:00' };
+  return {
+    local: `${match[1]}T${match[2]}`,
+    offset: match[3] === 'Z' ? '+00:00' : (match[3] || '-04:00'),
+  };
 }
 
 /* ================================================================== *
@@ -557,6 +621,99 @@ async function viewPlayers() {
 async function viewSettings() {
   mount('#tpl-settings');
   const league = structuredClone(State.league);
+  league.draft = league.draft || {};
+  league.platform = league.platform || { kind: 'manual', settings: {} };
+  league.platform.settings = league.platform.settings || {};
+
+  // -- league info ---------------------------------------------------
+  const bind = (sel, value, onChange, prop = 'value') => {
+    const node = $(sel);
+    if (!node) return null;
+    node[prop] = value ?? '';
+    node.oninput = e => onChange(e.target.value);
+    node.onchange = e => onChange(e.target.value);
+    return node;
+  };
+
+  bind('#sName', league.name, v => { league.name = v; });
+  bind('#sSeason', league.season, v => { league.season = Number(v) || league.season; });
+  bind('#sLeagueKey', league.platform.settings.league_id,
+       v => { league.platform.settings.league_id = v; });
+
+  $('#sPlatform').replaceChildren(...State.boot.platforms.map(p =>
+    el('option', { value: p.kind, selected: league.platform.kind === p.kind }, p.label)));
+  $('#sPlatform').onchange = e => { league.platform.kind = e.target.value; };
+
+  // -- draft schedule ------------------------------------------------
+  const parts = splitIso(league.draft.scheduled_at);
+  let whenLocal = parts.local;
+  let whenOffset = parts.offset;
+  const applyWhen = () => {
+    league.draft.scheduled_at = whenLocal ? `${whenLocal}:00${whenOffset}` : null;
+    refreshScheduleHint();
+  };
+
+  bind('#sWhen', whenLocal, v => { whenLocal = v; applyWhen(); });
+  const offsetSel = $('#sOffset');
+  offsetSel.value = whenOffset;
+  if (offsetSel.value !== whenOffset) {            // offset not in the list
+    offsetSel.append(el('option', { value: whenOffset, selected: true }, whenOffset));
+  }
+  offsetSel.onchange = e => { whenOffset = e.target.value; applyWhen(); };
+
+  bind('#sTzLabel', league.draft.timezone, v => { league.draft.timezone = v; });
+  bind('#sArrive', league.draft.arrive_minutes_early,
+       v => { league.draft.arrive_minutes_early = Number(v) || 0; });
+  bind('#sWhere', league.draft.location, v => { league.draft.location = v; });
+  bind('#sNotes', league.draft.notes, v => { league.draft.notes = v; });
+  bind('#sRounds', league.draft.rounds, v => { league.draft.rounds = Number(v) || 1; });
+  bind('#sClock', league.draft.seconds_per_pick,
+       v => { league.draft.seconds_per_pick = Number(v) || 60; });
+
+  const typeSel = $('#sDraftType');
+  typeSel.value = league.draft.type || 'snake';
+  typeSel.onchange = e => { league.draft.type = e.target.value; };
+
+  function refreshScheduleHint() {
+    const box = $('#sCountdown');
+    if (!league.draft.scheduled_at) { box.textContent = 'not scheduled'; return; }
+    const target = new Date(league.draft.scheduled_at);
+    if (Number.isNaN(target.getTime())) { box.textContent = 'unreadable date'; return; }
+    const seconds = Math.floor((target - new Date()) / 1000);
+    box.textContent = seconds > 0
+      ? `${formatCountdown(seconds)} away`
+      : 'in the past';
+  }
+  refreshScheduleHint();
+
+  // -- draft order ---------------------------------------------------
+  function renderOrder() {
+    const ids = (league.draft.order && league.draft.order.length)
+      ? league.draft.order.filter(id => league.teams.some(t => t.id === id))
+      : league.teams.map(t => t.id);
+    // Any team missing from a stale saved order goes on the end.
+    for (const team of league.teams) if (!ids.includes(team.id)) ids.push(team.id);
+    league.draft.order = ids;
+
+    const move = (from, to) => {
+      if (to < 0 || to >= ids.length) return;
+      [ids[from], ids[to]] = [ids[to], ids[from]];
+      league.draft.order = ids;
+      renderOrder();
+    };
+
+    $('#orderEditor').replaceChildren(...ids.map((id, i) => {
+      const team = league.teams.find(t => t.id === id);
+      return el('div', { class: 'order-row' },
+        el('span', { class: 'order-num' }, `${i + 1}`),
+        el('div', {}, team ? team.name : id,
+          team?.manager ? el('span', { class: 'meta' }, ` · ${team.manager}`) : null),
+        el('button', { class: 'btn ghost', type: 'button', title: 'Move up',
+          onclick: () => move(i, i - 1) }, '▲'),
+        el('button', { class: 'btn ghost', type: 'button', title: 'Move down',
+          onclick: () => move(i, i + 1) }, '▼'));
+    }));
+  }
 
   // -- projections ---------------------------------------------------
   async function refreshFiles() {
@@ -604,6 +761,73 @@ async function viewSettings() {
         })));
     }
   }
+
+  // -- scoring bonuses -----------------------------------------------
+  league.scoring_bonuses = league.scoring_bonuses || [];
+  const statOptions = Object.values(State.boot.stat_groups).flat();
+
+  function renderBonuses() {
+    $('#bonusEditor').replaceChildren(...league.scoring_bonuses.map((bonus, i) =>
+      el('div', { class: 'band-row' },
+        el('select', { onchange: e => { bonus.stat = e.target.value; } },
+          ...statOptions.map(s =>
+            el('option', { value: s.key, selected: bonus.stat === s.key }, s.label))),
+        el('input', { type: 'number', step: 'any', value: bonus.threshold,
+          title: 'Threshold',
+          oninput: e => { bonus.threshold = Number(e.target.value) || 0; } }),
+        el('div', { class: 'row', style: 'margin:0;gap:6px' },
+          el('input', { type: 'number', step: 'any', value: bonus.points,
+            title: 'Bonus points', style: 'width:80px',
+            oninput: e => { bonus.points = Number(e.target.value) || 0; } }),
+          el('button', { class: 'btn ghost', type: 'button', title: 'Remove',
+            onclick: () => { league.scoring_bonuses.splice(i, 1); renderBonuses(); } }, '×')))));
+  }
+  renderBonuses();
+  $('#btnAddBonus').onclick = () => {
+    league.scoring_bonuses.push({ stat: 'rush_yd', threshold: 100, points: 3 });
+    renderBonuses();
+  };
+
+  // -- points-allowed bands -------------------------------------------
+  league.scoring_bands = league.scoring_bands || {};
+  function renderBands() {
+    const bands = league.scoring_bands.dst_pa || [];
+    $('#bandEditor').replaceChildren(
+      ...bands.map((band, i) => el('div', { class: 'band-row' },
+        el('span', { class: 'meta' },
+          band.max === null || band.max === undefined
+            ? `${(bands[i - 1]?.max ?? 0) + 1}+ points allowed`
+            : (i === 0 ? `0 to ${band.max}` : `${(bands[i - 1].max ?? 0) + 1} to ${band.max}`)),
+        el('input', { type: 'number', step: 'any', value: band.points,
+          oninput: e => { band.points = Number(e.target.value) || 0; } }),
+        el('button', { class: 'btn ghost', type: 'button', title: 'Remove band',
+          onclick: () => { bands.splice(i, 1); renderBands(); } }, '×'))),
+      el('button', { class: 'btn ghost', type: 'button', onclick: () => {
+        if (!league.scoring_bands.dst_pa) league.scoring_bands.dst_pa = [];
+        const list = league.scoring_bands.dst_pa;
+        const last = list[list.length - 1];
+        if (last && last.max === null) list.splice(list.length - 1, 0,
+          { max: (list[list.length - 2]?.max ?? 0) + 7, points: 0 });
+        else list.push({ max: null, points: 0 });
+        renderBands();
+      } }, '+ Add band'));
+  }
+  renderBands();
+
+  // -- waivers / playoffs ---------------------------------------------
+  league.waivers = league.waivers || {};
+  league.playoffs = league.playoffs || {};
+  const wTypeSel = $('#wType');
+  wTypeSel.value = league.waivers.type || 'continual_rolling';
+  wTypeSel.onchange = e => { league.waivers.type = e.target.value; };
+  bind('#wDays', league.waivers.waiver_days, v => { league.waivers.waiver_days = Number(v) || 0; });
+  bind('#wProcess', league.waivers.process, v => { league.waivers.process = v; });
+  bind('#pTeams', league.playoffs.teams, v => { league.playoffs.teams = Number(v) || 0; });
+  bind('#pWeeks', (league.playoffs.weeks || []).join(', '), v => {
+    league.playoffs.weeks = v.split(',').map(s => Number(s.trim())).filter(Boolean);
+  });
+  bind('#tDeadline', league.trades.deadline_week,
+       v => { league.trades.deadline_week = Number(v) || null; });
 
   // -- roster slots --------------------------------------------------
   $('#rosterEditor').replaceChildren(...league.roster.slots.map(slot =>
@@ -666,6 +890,7 @@ async function viewSettings() {
       ...league.teams.map(t2 => el('option', { value: t2.id, selected: league.my_team_id === t2.id }, t2.name)));
   }
   renderTeams();
+  renderOrder();
   myTeamSel.onchange = e => { league.my_team_id = e.target.value || null; };
 
   // -- save ----------------------------------------------------------
@@ -685,6 +910,7 @@ async function viewSettings() {
       });
       State.league = saved;
       showProblems('#saveProblems', []);
+      startCountdown();
       toast('League saved.');
     } catch (err) {
       showProblems('#saveProblems', [err.message]);

@@ -7,14 +7,35 @@ different rules run the same code over different data.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
+
+
+def band_points(value: float, bands: Sequence[Mapping[str, Any]]) -> float:
+    """Points for a banded stat, e.g. defensive points allowed.
+
+    Bands are ``{"max": <inclusive upper bound or null>, "points": n}`` in
+    ascending order. The first band whose ``max`` the value does not exceed
+    wins; a ``max`` of ``null`` is the open-ended top band.
+    """
+    for band in bands:
+        ceiling = band.get("max")
+        if ceiling is None or float(value) <= float(ceiling):
+            return float(band.get("points", 0))
+    return 0.0
 
 
 def score_stats(stats: Mapping[str, float], cfg: Mapping[str, Any]) -> float:
     """Fantasy points for one stat line under ``cfg``."""
     rules = cfg.get("scoring") or {}
+    bands = cfg.get("scoring_bands") or {}
     total = 0.0
+
     for stat, value in stats.items():
+        # A banded stat is looked up, never multiplied — a defense allowing
+        # 13 points scores one band value, not 13 x something.
+        if stat in bands:
+            total += band_points(value, bands[stat])
+            continue
         multiplier = rules.get(stat)
         if multiplier:
             total += float(value) * float(multiplier)
@@ -39,8 +60,17 @@ def score_stats(stats: Mapping[str, float], cfg: Mapping[str, Any]) -> float:
 def explain(stats: Mapping[str, float], cfg: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Per-stat breakdown, so the UI can show *why* a projection is what it is."""
     rules = cfg.get("scoring") or {}
+    bands = cfg.get("scoring_bands") or {}
     rows = []
     for stat, value in stats.items():
+        if stat in bands:
+            rows.append({
+                "stat": stat,
+                "value": round(float(value), 2),
+                "per_unit": None,
+                "points": round(band_points(value, bands[stat]), 2),
+            })
+            continue
         multiplier = rules.get(stat)
         if not multiplier or not value:
             continue
