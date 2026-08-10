@@ -17,15 +17,18 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from .. import config as cfgmod
-from .. import store, trades
+from .. import matchups, store, trades, waivers
 from ..draft import DraftState, board_summary, recommend
 from ..platforms import PlatformError, adapter_for, describe_all, get_adapter
-from ..players import parse_projection_csv
+from ..players import Player, normalize_status, parse_projection_csv
 from ..storage import get_backend
 from ..pool import build_pool, index_by_id, invalidate
 from ..roster import describe_lineup, optimal_lineup
 from ..scoring_vocab import STAT_GROUPS
+from ..transactions import Transaction, acquisitions, activity
+from ..transactions import validate as validate_transaction
 from ..valuation import depth_warnings, replacement_levels
+from ..weekly import availability_note, has_weekly_projections, season_weeks, week_pool
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -365,18 +368,26 @@ def finish_draft(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any
 # --------------------------------------------------------------------------
 
 def _rosters(api: Api, cfg: dict[str, Any]) -> dict[str, list[Any]]:
-    """Season rosters, falling back to the draft while it is in progress."""
-    stored = store.load_rosters(cfg["id"])
-    if not stored:
-        stored = {}
-        for pick in store.load_picks(cfg["id"]):
-            if pick.player_id:
-                stored.setdefault(pick.team_id, []).append(pick.player_id)
+    """Season rosters as they stand now.
 
-    by_id = index_by_id(build_pool(cfg))
+    Post-draft rosters with the transaction log replayed over them, falling
+    back to the draft board while the draft is still in progress.
+    """
+    return _rosters_from(cfg, build_pool(cfg))
+
+
+def _rosters_from(
+    cfg: dict[str, Any], pool: list[Player]
+) -> dict[str, list[Player]]:
+    """Attach a pool's player objects to the current roster ids.
+
+    Taking the pool as an argument is what lets the same rosters be viewed
+    through season-long numbers or a single week's.
+    """
+    by_id = index_by_id(pool)
     return {
         team_id: [by_id[pid] for pid in ids if pid in by_id]
-        for team_id, ids in stored.items()
+        for team_id, ids in store.current_roster_ids(cfg["id"]).items()
     }
 
 
@@ -479,6 +490,226 @@ def save_trade(api: Api, params: dict[str, str], body: dict[str, Any]) -> Any:
 def saved_trades(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
     return {"trades": store.list_trades(cfg["id"])}
+
+
+# --------------------------------------------------------------------------
+# The in-season week
+#
+# Everything below is the loop the app runs from September to December: set a
+# lineup with Sunday-morning information, work the waiver wire, record what
+# happened, and watch what the other nine managers are doing about it.
+# --------------------------------------------------------------------------
+
+def _week_arg(api: Api, cfg: dict[str, Any], params: dict[str, str]) -> int:
+    """The week under discussion, defaulting to the next unscored one."""
+    raw = params.get("week") or api.arg("week")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise ApiError(f"'{raw}' is not a week number.") from exc
+    return matchups.default_week(cfg, store.load_scores(cfg["id"]))
+
+
+def _weekly_view(cfg: dict[str, Any], week: int) -> tuple[list[Player], dict[str, list[Player]]]:
+    statuses = store.load_statuses(cfg["id"], week)
+    pool = week_pool(cfg, week, statuses)
+    return pool, _rosters_from(cfg, pool)
+
+
+@route("GET", "/api/league/<league_id>/week")
+def get_week(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    """One team's week: lineup, bench, who is unavailable, and the matchup."""
+    cfg = api.load_cfg(params["league_id"])
+    week = _week_arg(api, cfg, params)
+    team_id = api.arg("team") or cfg.get("my_team_id")
+    if not team_id:
+        raise ApiError("Pick a team first.")
+
+    pool, rosters = _weekly_view(cfg, week)
+    players = rosters.get(team_id, [])
+    lineup, projected = optimal_lineup(players, cfg)
+    starting = {id(p) for group in lineup.values() for p in group}
+
+    projections = matchups.project_week(cfg, week, rosters)
+    summary = matchups.week_summary(
+        cfg, week, store.load_scores(cfg["id"]), projections, team_id
+    )
+
+    return {
+        "week": week,
+        "weeks": season_weeks(cfg),
+        "team_id": team_id,
+        "lineup": describe_lineup(players, cfg),
+        "bench": [p.to_dict() for p in players if id(p) not in starting],
+        "projected": projected,
+        "unavailable": [
+            {**p.to_dict(), "note": availability_note(p, week)}
+            for p in players
+            if not p.playable
+        ],
+        "matchup": summary["my_game"],
+        "projections": projections,
+        "weekly_projections": has_weekly_projections(cfg, week),
+        "statuses": store.load_statuses(cfg["id"], week),
+    }
+
+
+@route("POST", "/api/league/<league_id>/week/status")
+def set_player_status(api: Api, params: dict[str, str], body: dict[str, Any]) -> Any:
+    """Mark a player out (or clear it) for one week.
+
+    This is the Sunday-11:28am path — beat writer says inactive, you mark it,
+    the lineup re-solves. Stored per week so it never leaks into next week.
+    """
+    cfg = api.load_cfg(params["league_id"])
+    week = _week_arg(api, cfg, params)
+    player_id = (body.get("player_id") or "").strip()
+    if not player_id:
+        raise ApiError("Which player?")
+    status = normalize_status(str(body.get("status") or ""))
+    store.set_status(cfg["id"], week, player_id, status)
+    return {"ok": True, "week": week, "player_id": player_id, "status": status}
+
+
+@route("GET", "/api/league/<league_id>/waivers")
+def get_waivers(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    cfg = api.load_cfg(params["league_id"])
+    week = _week_arg(api, cfg, params)
+    team_id = api.arg("team") or cfg.get("my_team_id")
+    if not team_id:
+        raise ApiError("Pick a team first.")
+
+    pool, rosters = _weekly_view(cfg, week)
+    if team_id not in rosters:
+        raise ApiError("That team has no roster yet — finish the draft first.")
+
+    available = waivers.free_agents(pool, rosters)
+    txns = store.list_transactions(cfg["id"])
+    spent = sum(float(t.faab or 0) for t in txns if t.team_id == team_id)
+    budget = float((cfg.get("waivers") or {}).get("faab_budget") or 0)
+
+    result = waivers.recommend(
+        cfg,
+        rosters[team_id],
+        available,
+        week=week,
+        limit=int(api.arg("limit") or 15),
+        faab_remaining=max(0.0, budget - spent),
+    )
+    result["team_id"] = team_id
+    result["weeks"] = season_weeks(cfg)
+    result["drops"] = waivers.drop_candidates(cfg, rosters[team_id])
+    result["limits"] = waivers.acquisition_limits(
+        cfg,
+        added_this_week=acquisitions(txns, team_id, week),
+        added_this_season=acquisitions(txns, team_id),
+    )
+    return result
+
+
+@route("GET", "/api/league/<league_id>/scoreboard")
+def get_scoreboard(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    """Every game this week, projected before kickoff and final after it."""
+    cfg = api.load_cfg(params["league_id"])
+    week = _week_arg(api, cfg, params)
+    _pool, rosters = _weekly_view(cfg, week)
+    scores = store.load_scores(cfg["id"])
+    summary = matchups.week_summary(
+        cfg, week, scores, matchups.project_week(cfg, week, rosters)
+    )
+    summary["weeks"] = season_weeks(cfg)
+    summary["teams"] = cfg.get("teams", [])
+    summary["my_team_id"] = cfg.get("my_team_id")
+    summary["recorded"] = scores.get(week, {})
+    return summary
+
+
+@route("POST", "/api/league/<league_id>/scores")
+def record_scores(api: Api, params: dict[str, str], body: dict[str, Any]) -> Any:
+    """Type in what each team actually scored. Standings follow from it."""
+    cfg = api.load_cfg(params["league_id"])
+    week = _week_arg(api, cfg, params)
+    raw = body.get("scores")
+    if not isinstance(raw, dict):
+        raise ApiError("Send scores as {team_id: points}.")
+
+    known = {t["id"] for t in cfg.get("teams") or []}
+    scores: dict[str, float] = {}
+    for team_id, points in raw.items():
+        if team_id not in known:
+            raise ApiError(f"'{team_id}' is not a team in this league.")
+        if points in (None, ""):
+            continue
+        try:
+            scores[team_id] = float(points)
+        except (TypeError, ValueError) as exc:
+            raise ApiError(f"'{points}' is not a score.") from exc
+
+    store.set_week_scores(cfg["id"], week, scores)
+    return {"ok": True, "week": week, "teams_scored": len(scores)}
+
+
+@route("GET", "/api/league/<league_id>/standings")
+def get_standings(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    cfg = api.load_cfg(params["league_id"])
+    summary = matchups.season_summary(cfg, store.load_scores(cfg["id"]))
+    summary["teams"] = cfg.get("teams", [])
+    return summary
+
+
+@route("GET", "/api/league/<league_id>/schedule")
+def get_schedule(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    cfg = api.load_cfg(params["league_id"])
+    return {
+        "schedule": matchups.schedule(cfg),
+        "teams": cfg.get("teams", []),
+        "generated": not (cfg.get("schedule") or []),
+        "my_team_id": cfg.get("my_team_id"),
+    }
+
+
+@route("GET", "/api/league/<league_id>/transactions")
+def get_transactions(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    """The league's activity feed, and what it says about each rival."""
+    cfg = api.load_cfg(params["league_id"])
+    since = api.arg("since_week")
+    pool = index_by_id(build_pool(cfg))
+    return activity(
+        cfg,
+        store.list_transactions(cfg["id"]),
+        pool,
+        since_week=int(since) if since else None,
+    )
+
+
+@route("POST", "/api/league/<league_id>/transactions")
+def add_transaction(api: Api, params: dict[str, str], body: dict[str, Any]) -> Any:
+    cfg = api.load_cfg(params["league_id"])
+    txn = Transaction.from_dict(body)
+    if txn.week is None:
+        txn.week = _week_arg(api, cfg, params)
+    if not txn.date:
+        txn.date = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    problems = validate_transaction(txn, cfg)
+    if problems:
+        raise ApiError("; ".join(problems))
+
+    txn.id = store.add_transaction(cfg["id"], txn)
+    return {"transaction": txn.to_dict()}
+
+
+@route("DELETE", "/api/league/<league_id>/transactions/<txn_id>")
+def remove_transaction(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    cfg = api.load_cfg(params["league_id"])
+    try:
+        txn_id = int(params["txn_id"])
+    except ValueError as exc:
+        raise ApiError("Transaction id must be a number.") from exc
+    if not store.delete_transaction(cfg["id"], txn_id):
+        raise ApiError("No such transaction.", 404)
+    return {"ok": True}
 
 
 # --------------------------------------------------------------------------

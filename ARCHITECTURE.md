@@ -4,13 +4,13 @@
 
 | Layer | Choice | Lines |
 | --- | --- | --- |
-| Language | Python 3.9+ | ~3,600 |
-| Dependencies | **none** — pure standard library | 0 |
-| HTTP server | `http.server.ThreadingHTTPServer` + a decorator router | ~600 |
-| Season state | SQLite via stdlib `sqlite3` | ~190 |
-| League rules | JSON files under `leagues/` | — |
-| Frontend | Vanilla HTML/CSS/JS, no build step | ~1,460 |
-| Tests | stdlib `unittest` | ~520 |
+| Language | Python 3.9+ | ~6,400 |
+| Dependencies | **none** locally — pure standard library | 0 |
+| HTTP server | `http.server.ThreadingHTTPServer` + a decorator router | ~1,000 |
+| Season state | SQLite via stdlib `sqlite3`, or Postgres when hosted | ~1,300 |
+| League rules | JSON files under `leagues/`, or a `JSONB` column | — |
+| Frontend | Vanilla HTML/CSS/JS, no build step | ~1,930 |
+| Tests | stdlib `unittest` | ~1,780 |
 
 Verify the zero-dependency claim yourself:
 
@@ -41,19 +41,30 @@ The code is deliberately split into a pure core and a thin shell:
         pure functions, no I/O, no globals          I/O and state
    ┌────────────────────────────────────────┐   ┌──────────────────┐
    │ scoring_vocab · scoring · valuation    │   │ config (load)    │
-   │ roster · draft · trades                │   │ store (sqlite)   │
-   │                                        │   │ players (csv)    │
-   │ config: schema, validation, derived    │   │ platforms/       │
-   │ views (starters_by_position, …)        │   │ web/server       │
+   │ roster · draft · trades                │   │ store            │
+   │ weekly · waivers · matchups            │   │ storage/         │
+   │ transactions                           │   │ players (csv)    │
+   │                                        │   │ platforms/       │
+   │ config: schema, validation, derived    │   │ web/server       │
+   │ views (starters_by_position, …)        │   │                  │
    └────────────────────────────────────────┘   └──────────────────┘
-              ~1,500 lines. Ports unchanged.       Gets replaced.
+              ~2,800 lines. Ports unchanged.       Gets replaced.
 ```
 
 Every engine function takes a config dict and a list of players and returns a
 value. No module-level mutable state, no database handles, no filesystem
 access. That is the expensive, hard-won part — the VOR baselines, tier
-detection, run-risk model, trade search — and **none of it changes when this
-becomes multi-user.**
+detection, run-risk model, trade search, marginal-lineup waiver valuation —
+and **none of it changes when this becomes multi-user.**
+
+The in-season engines were added to this side of the line on purpose, and it
+shows in what they *don't* do. `weekly` takes a pool and returns a pool.
+`waivers` takes a roster and a list of free agents. `matchups` takes a config
+and a `{week: {team: points}}` mapping. `transactions` takes a list of moves
+and a starting roster and returns the resulting one. None of them knows where
+any of that came from, which is why the same code answers a question about
+week 3 whether the scores were typed in, imported, or one day pulled from
+Yahoo.
 
 ## What blocks multi-user today
 
@@ -65,11 +76,11 @@ Concrete, and all in the shell:
 | 2 | Yahoo OAuth uses the `oob` copy-paste flow | `ff/platforms/yahoo.py` `REDIRECT_URI` | Correct locally, wrong hosted — needs a real redirect URI. |
 | 3 | League configs are files in one shared directory with no owner | `ff/config.py` `LEAGUES_DIR` | Every user would see every league. |
 | 4 | Projection CSVs live in one shared directory | `ff/players.py` `PROJECTIONS_DIR` | One user's upload changes everyone's valuations. |
-| 5 | No `user_id` anywhere; tables key on `league_id` only | `ff/store.py` `SCHEMA` | Needs an ownership column and a join. |
+| 5 | No `user_id` anywhere; tables key on `league_id` only | `ff/storage/files.py` and `ff/storage/postgres.py` `SCHEMA` | Needs an ownership column and a join. |
 | 6 | No authentication, sessions, or CSRF protection | `ff/web/server.py` | The API is wide open by design. |
 | 7 | `http.server` is a development server | `ff/web/server.py` `serve()` | No TLS, no graceful restart, limited concurrency. |
 | 8 | In-process pool cache | `ff/pool.py` `_CACHE` | Correct (league-keyed) but not shared across workers. |
-| 9 | SQLite under concurrent writers | `ff/store.py` | Fine for one user; contended for many. |
+| 9 | SQLite under concurrent writers | `ff/storage/files.py` | Fine for one user; contended for many. Already solved when `DATABASE_URL` is set. |
 
 Note what is *not* on that list: none of the scoring, valuation, draft or trade
 logic. The migration is a shell replacement.

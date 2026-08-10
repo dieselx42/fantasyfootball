@@ -2,8 +2,9 @@
 
 A local web app for drafting a fantasy football team and running it through the
 season. It scores players under **your** league's rules, ranks them by value
-over replacement, runs a live draft board, sets your weekly lineup, and
-suggests trades that your league would actually approve.
+over replacement, runs a live draft board, sets your weekly lineup around byes
+and injuries, works the waiver wire, tracks what every other manager in the
+league is doing, and suggests trades your league would actually approve.
 
 The central design decision: **league logic is data, not code.** Every rule —
 scoring, roster slots, draft format, trade constraints — lives in a JSON file
@@ -120,6 +121,56 @@ the moment the draft ends.
 `Undo` fixes a misclick. Picks are stored as an ordered list and every derived
 view is recomputed from it, so the board can never drift out of sync.
 
+## The season
+
+The draft is one night; the season is four months. Two tabs cover it.
+
+### Week
+
+Lineup and waiver wire together, because they are one decision — the question
+is never "who starts" or "who do I add" in isolation, it is *what is the best
+team I can field on Sunday*.
+
+- **Availability is a number, not a special case.** A player on bye scores
+  zero; one ruled out scores zero; a questionable one is discounted. Because
+  that lands in his projection, the existing lineup optimiser benches him on
+  its own. There is no start/sit rule anywhere in the codebase.
+- **Sunday 11:28.** A beat writer reports someone inactive. Set his status on
+  his row and the lineup re-solves immediately — no re-import, and the
+  override is scoped to that week so it never leaks into the next one.
+- **The waiver wire is ranked on what it changes, not on who is best.** The
+  headline number is marginal starting-lineup gain: your best lineup with the
+  player minus your best lineup without him. A genuinely good WR who would sit
+  behind three better ones is worth *zero*, and says so.
+- Two horizons are scored separately, because they disagree constantly and the
+  disagreement is the point: a handcuff whose starter just went down is worth
+  nothing this week and a great deal for the rest of the season.
+- With a full roster every add is paired with **the drop that makes room for
+  it**, and the gain is measured after the swap. The suggested drop is the one
+  that costs least — usually not your worst player, but your worst player at a
+  position you are deep in.
+- FAAB leagues get a **bid**, anchored on how much the add improves your
+  starting lineup as a fraction of what that lineup already scores, scaled by
+  `waivers.bid_aggressiveness` and never more than 60% of what you have left.
+
+### Results
+
+- **Scoreboard** — every game in the week, projected before kickoff and final
+  after it, so you know which matchups are close while you can still do
+  something about it.
+- **Standings** — records, points for and against, streaks, and the playoff
+  line drawn where your config puts it. Leagues that play against the median
+  get that second weekly result counted too.
+- **League activity** — every add, drop and trade in the league, not just
+  yours, plus which positions the league is chasing. That last one is a sell
+  signal: if four managers spent the week buying running backs, yours are
+  worth more than they were on Tuesday.
+
+Transactions are an append-only log, and current rosters are *derived* by
+replaying it over the draft result. So a mistyped add is undone by deleting
+one row rather than rebuilding a roster by hand, and the history survives
+either way.
+
 ## Trades
 
 Two directions, one engine:
@@ -215,7 +266,21 @@ Everything below is editable in the UI (**League** tab) and lives in
     "max_players_per_side": 3,
     "allow_uneven": true,
     "fairness": { "max_value_gap_pct": 15, "require_both_improve": true }
-  }
+  },
+  "waivers": { "type": "faab", "faab_budget": 100, "bid_aggressiveness": 4 },
+  "playoffs": { "teams": 6, "weeks": [15, 16, 17] },
+  "valuation": {
+    // How the waiver board blends "helps this Sunday" against "helps in
+    // November" against "is simply the best player left".
+    "waiver_weights": { "week": 1.0, "rest_of_season": 0.6, "upside": 0.15 },
+    // What share of a projection each injury status leaves behind.
+    "status_multipliers": { "Q": 0.92, "D": 0.25 }
+  },
+  // Optional. Absent, a round robin is generated; paste your platform's real
+  // fixtures here and the standings match the site exactly.
+  "schedule": [
+    { "week": 1, "games": [{ "home": "diesel", "away": "code-brown" }] }
+  ]
 }
 ```
 
@@ -273,9 +338,14 @@ ff/
   valuation.py          replacement level, VOR, tiers, scarcity
   roster.py             slot filling, optimal lineup, roster need
   draft.py              draft state, snake order, pick recommendations
+  weekly.py             season projections -> one week, byes and injuries
+  waivers.py            free agent value, add/drop pairing, FAAB bids
+  matchups.py           schedule, weekly results, standings
+  transactions.py       the league's roster moves, and replaying them
   trades.py             trade evaluation, legality, suggestion search
   pool.py               scored+valued player pool, cached
-  store.py              SQLite persistence for picks, rosters, saved trades
+  store.py              persistence for picks, rosters, scores, the log
+  storage/              file and Postgres backends behind one interface
   platforms/            pluggable platform adapters
   web/                  HTTP server + the single-page frontend
 leagues/                your league configs — this is the swappable part
@@ -292,5 +362,15 @@ tests/
   only 12 kickers, the 12th is treated as replacement level and kicker value
   is overstated. Import a full pool.
 - Auction drafts are modelled in the config but the board is snake/linear only.
-- Weekly scoring assumes season-long projections divided evenly; there is no
-  week-by-week matchup or injury feed yet.
+- **Nothing is fetched automatically.** Weekly projections, injury statuses,
+  final scores and other managers' transactions are all things the app can
+  hold, reason about and act on — but you enter or import them. The Yahoo
+  adapter reads teams, rosters and settings; it does not yet pull the
+  scoreboard, the transaction log or live stat corrections.
+- Without a week-specific projection file, weekly numbers are the season total
+  divided across the schedule. That is a real number but a blunt one: it knows
+  about byes and injuries and nothing about matchups. The Week tab flags when
+  it is falling back to it.
+- The generated schedule is a round robin, not your league's actual fixture
+  list. Paste the real one into `schedule` in your league config if you want
+  the standings to line up exactly with the site before the season ends.

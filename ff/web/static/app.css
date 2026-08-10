@@ -75,6 +75,9 @@ h3 { font-size: 14px; text-transform: uppercase; letter-spacing: .6px;
 }
 .stack { max-width: 1100px; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+/* Controls sitting beside a heading size to their content; only controls in a
+   form grid want the full column width. */
+.row > .sel, .row > input { width: auto; margin-top: 0; }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
 label { display: block; font-size: 13px; color: var(--dim); }
 label.inline { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
@@ -163,8 +166,86 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .bar { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--warn); }
 
-.lineup .prow { grid-template-columns: 56px 40px 1fr auto; }
+.lineup .prow { grid-template-columns: 56px 40px 1fr auto auto; }
 .slotname { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; }
+
+/* ---------- the week ---------- */
+.week-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .week-grid { grid-template-columns: 1fr; } }
+
+.banner { background: #33260c; border: 1px solid var(--warn); color: #f0d08a;
+          padding: 11px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 13px; }
+
+.matchup { margin-bottom: 16px; }
+.matchup-card {
+  display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 18px;
+}
+.matchup-card .side { text-align: center; }
+.matchup-card .score { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.matchup-card .meta { font-size: 12px; color: var(--dim); }
+.matchup-card .vs { color: var(--dim); font-size: 13px; font-weight: 700; letter-spacing: .5px; }
+.matchup-card.win { border-color: var(--good); }
+.matchup-card.win .vs { color: var(--good); }
+.matchup-card.loss { border-color: var(--bad); }
+.matchup-card.loss .vs { color: var(--bad); }
+
+/* Availability. An unstartable player stays visible but reads as unavailable —
+   hiding him would make "why is my projection down" unanswerable. */
+.prow.out { opacity: .55; }
+.prow.out .num2 { color: var(--bad); }
+select.status {
+  width: auto; margin-top: 0; padding: 3px 6px; font-size: 12px; color: var(--dim);
+}
+
+.wrec { background: var(--panel-2); border: 1px solid var(--line);
+        border-radius: 10px; padding: 11px 13px; }
+.wrec:hover { border-color: var(--accent); }
+.wrec .rec-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.wrec .rec-nums { display: flex; gap: 14px; margin: 7px 0 4px;
+                  font-size: 13px; font-variant-numeric: tabular-nums; color: var(--dim); }
+.wrec .gain { color: var(--good); }
+.wrec .gain.none { color: var(--dim); }
+.wrec .meta { font-size: 12px; color: var(--dim); }
+.pill.warn { border-color: var(--warn); color: var(--warn); }
+.btn.tiny { padding: 1px 8px; font-size: 13px; line-height: 1.5; }
+
+/* ---------- results ---------- */
+.scoreboard { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.game {
+  display: grid; grid-template-columns: 1fr 70px 46px 70px 1fr; gap: 10px;
+  align-items: center; padding: 9px 12px; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid transparent; font-size: 14px;
+}
+.game.final { border-color: var(--line); }
+.game .gscore { font-variant-numeric: tabular-nums; text-align: center; font-weight: 600; }
+.game .gdash { text-align: center; color: var(--dim); font-size: 12px; }
+.game .gteam { color: var(--dim); }
+.game .gteam:last-child { text-align: right; }
+.game .gteam.won { color: var(--text); font-weight: 600; }
+.score-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.score-form .btn { margin-top: 12px; }
+
+.standings { display: flex; flex-direction: column; gap: 3px; }
+.srow {
+  display: grid; grid-template-columns: 30px 1fr 74px 66px 66px 54px; gap: 10px;
+  align-items: center; padding: 7px 10px; border-radius: 8px; font-size: 14px;
+  font-variant-numeric: tabular-nums; border-left: 3px solid transparent;
+}
+.srow.head { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.srow.playoff { background: var(--panel-2); border-left-color: var(--good); }
+.srow.mine { outline: 1px solid var(--accent); }
+
+.chased { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.chased .hint { margin: 0; }
+.feed { display: flex; flex-direction: column; gap: 5px; max-height: 46vh; overflow: auto; }
+.frow {
+  display: grid; grid-template-columns: 60px 1fr auto; gap: 10px; align-items: center;
+  background: var(--panel-2); padding: 7px 12px; border-radius: 8px; font-size: 14px;
+}
+.mover { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.mover summary { cursor: pointer; color: var(--dim); font-size: 13px; margin-bottom: 12px; }
 
 /* ---------- trades ---------- */
 .trades { display: flex; flex-direction: column; gap: 12px; }

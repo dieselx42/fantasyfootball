@@ -12,7 +12,8 @@
   <div class="brand">Fantasy&nbsp;Assistant</div>
   <nav id="nav" class="tabs" hidden>
     <button data-view="draft" class="tab">Draft</button>
-    <button data-view="team" class="tab">My Team</button>
+    <button data-view="week" class="tab">Week</button>
+    <button data-view="results" class="tab">Results</button>
     <button data-view="trades" class="tab">Trades</button>
     <button data-view="players" class="tab">Players</button>
     <button data-view="settings" class="tab">League</button>
@@ -124,14 +125,93 @@
   </section>
 </template>
 
-<!-- ===================== SIMPLE VIEWS ===================== -->
-<template id="tpl-team">
+<!-- ===================== THE WEEK ===================== -->
+<template id="tpl-week">
   <section class="stack">
-    <h1>My Team</h1>
-    <select id="teamPicker" class="sel"></select>
-    <div class="panel"><h3>Optimal lineup <span id="lineupTotal" class="pill"></span></h3>
-      <div id="lineup" class="lineup"></div></div>
-    <div class="panel"><h3>Bench</h3><div id="benchList" class="roster"></div></div>
+    <div class="row">
+      <h1>Week <span id="wkNum"></span></h1>
+      <select id="wkPicker" class="sel"></select>
+      <select id="wkTeam" class="sel"></select>
+    </div>
+    <div id="wkBanner" class="banner" hidden></div>
+    <div id="wkMatchup" class="matchup"></div>
+
+    <div class="week-grid">
+      <div class="panel">
+        <h3>Starting lineup <span id="wkTotal" class="pill"></span></h3>
+        <p class="hint">Set a player's status and the lineup re-solves — an
+          <b>Out</b> player scores zero, so the optimiser benches him for you.</p>
+        <div id="wkLineup" class="lineup"></div>
+        <h3>Bench</h3>
+        <div id="wkBench" class="roster"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Waiver wire <span id="wkFaab" class="pill"></span></h3>
+        <p class="hint">Ranked by what each player adds to your <b>starting
+          lineup</b> — this week and, separately, for the rest of the season.
+          A great player who would never start is worth nothing to you.</p>
+        <div id="wkLimits" class="problems" hidden></div>
+        <div id="wkWaivers" class="recs"></div>
+        <h3>Cheapest players to drop</h3>
+        <div id="wkDrops" class="roster"></div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<!-- ===================== RESULTS ===================== -->
+<template id="tpl-results">
+  <section class="stack">
+    <div class="row">
+      <h1>Results</h1>
+      <select id="rsWeek" class="sel"></select>
+    </div>
+
+    <div class="panel">
+      <h3>Scoreboard <span id="rsState" class="pill"></span></h3>
+      <div id="rsBoard" class="scoreboard"></div>
+      <button id="btnScores" class="btn ghost" type="button">Enter final scores</button>
+      <div id="rsScoreForm" class="score-form" hidden></div>
+    </div>
+
+    <div class="panel">
+      <h3>Standings</h3>
+      <p class="hint" id="rsTiebreak"></p>
+      <div id="rsStandings" class="standings"></div>
+    </div>
+
+    <div class="panel">
+      <h3>League activity</h3>
+      <p class="hint">Every add, drop and trade in the league. Rosters are
+        derived by replaying this log over the draft, so deleting a row undoes
+        the move.</p>
+      <div id="rsChased" class="chased"></div>
+      <div id="rsFeed" class="feed"></div>
+      <details class="mover">
+        <summary>Record a move</summary>
+        <div class="fields">
+          <label>Team <select id="mvTeam" class="sel"></select></label>
+          <label>Type
+            <select id="mvType" class="sel">
+              <option value="add_drop">Add / drop</option>
+              <option value="add">Add</option>
+              <option value="drop">Drop</option>
+              <option value="waiver">Waiver claim</option>
+              <option value="trade">Trade</option>
+            </select>
+          </label>
+          <label id="mvPartnerWrap" hidden>With
+            <select id="mvPartner" class="sel"></select>
+          </label>
+          <label>Adds (player search) <input id="mvAdds" type="text" placeholder="comma separated"></label>
+          <label>Drops <input id="mvDrops" type="text" placeholder="comma separated"></label>
+          <label>FAAB <input id="mvFaab" type="number" min="0" step="1"></label>
+        </div>
+        <div id="mvProblems" class="problems" hidden></div>
+        <button id="btnMove" class="btn primary" type="button">Record</button>
+      </details>
+    </div>
   </section>
 </template>
 

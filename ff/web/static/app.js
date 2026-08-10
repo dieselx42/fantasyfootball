@@ -59,6 +59,9 @@ const State = {
   search: '',
   draft: null,
   pool: [],
+  // The week the in-season views are looking at. Null until the server picks
+  // one, which it does by finding the first week with no scores recorded.
+  week: null,
 };
 
 const POS_ALL = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'];
@@ -72,7 +75,7 @@ function mount(templateId) {
 function setView(view) {
   State.view = view;
   $$('#nav .tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
-  ({ draft: viewDraft, team: viewTeam, trades: viewTrades,
+  ({ draft: viewDraft, week: viewWeek, results: viewResults, trades: viewTrades,
      players: viewPlayers, settings: viewSettings })[view]();
 }
 
@@ -107,6 +110,10 @@ async function loadLeague(id) {
   const { league, schedule } = await api(`/api/league/${id}`);
   State.league = league;
   State.schedule = schedule;
+  // Anything cached from the previous league is about a different set of
+  // players and a different season.
+  State.week = null;
+  State.pool = [];
   $('#nav').hidden = false;
   $('#leaguePicker').hidden = false;
   $('#leaguePicker').value = id;
@@ -480,38 +487,341 @@ async function draftPlayer(player, teamId) {
  * MY TEAM
  * ================================================================== */
 
-async function viewTeam() {
-  mount('#tpl-team');
+/* ================================================================== *
+ * THE WEEK
+ *
+ * Lineup and waiver wire together, because they are one decision: the
+ * question is never "who starts" or "who do I add" in isolation, it is
+ * "what is the best team I can field on Sunday".
+ * ================================================================== */
+
+const STATUS_OPTIONS = [
+  ['', 'Healthy'], ['Q', 'Questionable'], ['D', 'Doubtful'],
+  ['O', 'Out'], ['IR', 'IR'], ['SUS', 'Suspended'],
+];
+
+function teamName(id) {
+  return (State.league.teams || []).find(t => t.id === id)?.name || id || '—';
+}
+
+async function viewWeek() {
+  mount('#tpl-week');
   const id = State.league.id;
-  const picker = $('#teamPicker');
-  picker.replaceChildren(...(State.league.teams || [])
-    .map(t => el('option', { value: t.id }, t.name)));
-  picker.value = State.league.my_team_id || State.league.teams?.[0]?.id || '';
-  picker.onchange = load;
-  await load();
+  const teams = State.league.teams || [];
 
-  async function load() {
-    let data;
+  $('#wkTeam').replaceChildren(...teams.map(t => el('option', { value: t.id }, t.name)));
+  $('#wkTeam').value = State.league.my_team_id || teams[0]?.id || '';
+  $('#wkTeam').onchange = () => refresh();
+  $('#wkPicker').onchange = () => { State.week = Number($('#wkPicker').value); refresh(); };
+
+  await refresh();
+
+  async function refresh() {
+    await loadWeek();
+    await loadWaivers();
+  }
+
+  function query(extra = {}) {
+    const q = new URLSearchParams({ team: $('#wkTeam').value, ...extra });
+    if (State.week) q.set('week', State.week);
+    return q;
+  }
+
+  async function setStatus(playerId, status) {
     try {
-      data = await api(`/api/league/${id}/lineup?team=${encodeURIComponent(picker.value)}`);
+      await api(`/api/league/${id}/week/status?week=${State.week}`,
+        { method: 'POST', body: { player_id: playerId, status } });
     } catch (err) { toast(err.message, true); return; }
+    await refresh();
+  }
 
-    $('#lineupTotal').textContent = `${num(data.projected)} pts`;
-    $('#lineup').replaceChildren(...data.lineup.map(row =>
-      el('div', { class: 'prow' },
-        el('span', { class: 'slotname' }, row.slot),
-        row.player ? el('span', { class: `pos ${row.player.pos}` }, row.player.pos)
-                   : el('span', {}),
-        el('div', {}, row.player ? row.player.name : '—'),
-        el('span', { class: 'num2' }, row.player ? num(row.player.points, 0) : ''))));
+  function playerRow(player, slot) {
+    return el('div', { class: 'prow' + (player && !player.playable ? ' out' : '') },
+      slot ? el('span', { class: 'slotname' }, slot) : null,
+      player ? el('span', { class: `pos ${player.pos}` }, player.pos) : el('span', {}),
+      el('div', {}, player ? player.name : '—',
+        player && el('div', { class: 'meta' },
+          [player.team || 'FA',
+           player.opponent ? `vs ${player.opponent}` : null,
+           player.bye ? `bye ${player.bye}` : null].filter(Boolean).join(' · '))),
+      el('span', { class: 'num2' }, player ? num(player.points) : ''),
+      player
+        ? el('select', {
+            class: 'status', title: 'Availability',
+            onchange: e => setStatus(player.player_id, e.target.value),
+          }, ...STATUS_OPTIONS.map(([value, label]) =>
+              el('option', { value, selected: player.status === value || null }, label)))
+        : el('span', {}));
+  }
 
-    $('#benchList').replaceChildren(...(data.bench.length
-      ? data.bench.map(p => el('div', { class: 'prow' },
-          el('span', { class: `pos ${p.pos}` }, p.pos),
-          el('div', {}, p.name),
-          el('span', { class: 'num2' }, num(p.points, 0)),
-          el('span', {})))
+  async function loadWeek() {
+    let data;
+    try { data = await api(`/api/league/${id}/week?${query()}`); }
+    catch (err) { toast(err.message, true); return; }
+
+    State.week = data.week;
+    $('#wkNum').textContent = data.week;
+    $('#wkPicker').replaceChildren(...data.weeks.map(w =>
+      el('option', { value: w, selected: w === data.week || null }, `Week ${w}`)));
+
+    const banner = $('#wkBanner');
+    banner.hidden = data.weekly_projections;
+    banner.textContent =
+      'No week-specific projections imported — these are season totals split ' +
+      'evenly across the schedule, so they know nothing about this week\'s ' +
+      'matchup. Import a CSV with a "week" column for real weekly numbers.';
+
+    $('#wkTotal').textContent = `${num(data.projected)} pts`;
+    $('#wkMatchup').replaceChildren(renderMatchup(data.matchup, data.projected));
+    $('#wkLineup').replaceChildren(
+      ...data.lineup.map(row => playerRow(row.player, row.slot)));
+    $('#wkBench').replaceChildren(...(data.bench.length
+      ? data.bench.map(p => playerRow(p, null))
       : [el('div', { class: 'hint' }, 'No bench players.')]));
+  }
+
+  function renderMatchup(game, projected) {
+    if (!game) {
+      return el('div', { class: 'hint' },
+        'No fixture this week — check the schedule under League.');
+    }
+    const final = game.result !== 'pending';
+    return el('div', { class: `matchup-card ${final ? game.result : 'pending'}` },
+      el('div', { class: 'side' },
+        el('h4', {}, 'You'),
+        el('div', { class: 'score' }, final ? num(game.my_points) : num(projected)),
+        el('div', { class: 'meta' }, final ? 'final' : 'projected')),
+      el('div', { class: 'vs' }, final ? game.result.toUpperCase() : 'vs'),
+      el('div', { class: 'side' },
+        el('h4', {}, teamName(game.opponent)),
+        el('div', { class: 'score' },
+          final ? num(game.opponent_points) : num(game.opponent_projected)),
+        el('div', { class: 'meta' }, final ? 'final' : 'projected')));
+  }
+
+  async function loadWaivers() {
+    const box = $('#wkWaivers');
+    box.replaceChildren(el('div', { class: 'hint' }, 'Searching the wire…'));
+    let data;
+    try { data = await api(`/api/league/${id}/waivers?${query({ limit: 12 })}`); }
+    catch (err) { box.replaceChildren(el('div', { class: 'hint' }, err.message)); return; }
+
+    $('#wkFaab').textContent = data.faab
+      ? `$${num(data.faab.remaining, 0)} of $${num(data.faab.budget, 0)} left`
+      : `${data.roster_size}/${data.roster_capacity} roster spots`;
+    const limits = $('#wkLimits');
+    limits.hidden = !(data.limits || []).length;
+    limits.replaceChildren(...(data.limits || []).map(m => el('div', {}, m)));
+
+    if (!data.recommendations.length) {
+      box.replaceChildren(el('div', { class: 'empty' },
+        el('h3', {}, 'Nothing worth adding'),
+        el('p', {}, 'No free agent improves this lineup. That is a good sign.')));
+    } else {
+      box.replaceChildren(...data.recommendations.map(r => el('div', { class: 'wrec' },
+        el('div', { class: 'rec-head' },
+          el('span', { class: `pos ${r.player.pos}` }, r.player.pos),
+          el('b', {}, r.player.name),
+          r.bid !== null && r.bid !== undefined
+            ? el('span', { class: 'pill' }, `bid $${r.bid}`) : null,
+          r.fills_gap ? el('span', { class: 'pill warn' }, 'fills a hole') : null),
+        el('div', { class: 'rec-nums' },
+          el('span', {
+            class: 'gain' + (r.gain_week > 0 ? '' : ' none'),
+            title: 'Points added to this week\'s starting lineup',
+          }, `week ${r.gain_week > 0 ? '+' : ''}${num(r.gain_week)}`),
+          el('span', {
+            class: 'gain' + (r.gain_per_week > 0 ? '' : ' none'),
+            title: 'Points added per week for the rest of the season',
+          }, `rest ${r.gain_per_week > 0 ? '+' : ''}${num(r.gain_per_week)}/wk`),
+          el('span', { title: 'Value over replacement' }, `vor ${num(r.vor)}`)),
+        el('div', { class: 'meta' }, r.reason))));
+    }
+
+    $('#wkDrops').replaceChildren(...(data.drops || []).slice(0, 5).map(d =>
+      el('div', { class: 'prow' },
+        el('span', { class: `pos ${d.player.pos}` }, d.player.pos),
+        el('div', {}, d.player.name,
+          el('div', { class: 'meta' },
+            d.starter ? 'currently starting' : 'not in your lineup')),
+        el('span', { class: 'num2', title: 'What dropping him costs you' },
+          d.cost > 0 ? `−${num(d.cost)}` : 'free'),
+        el('span', {}))));
+  }
+}
+
+/* ================================================================== *
+ * RESULTS
+ * ================================================================== */
+
+async function viewResults() {
+  mount('#tpl-results');
+  const id = State.league.id;
+  const teams = State.league.teams || [];
+
+  $('#rsWeek').onchange = () => { State.week = Number($('#rsWeek').value); loadBoard(); };
+  $('#btnScores').onclick = () => {
+    const form = $('#rsScoreForm');
+    form.hidden = !form.hidden;
+  };
+
+  await Promise.all([loadBoard(), loadStandings(), loadActivity()]);
+  setupMover();
+
+  async function loadBoard() {
+    let data;
+    const q = State.week ? `?week=${State.week}` : '';
+    try { data = await api(`/api/league/${id}/scoreboard${q}`); }
+    catch (err) { toast(err.message, true); return; }
+
+    State.week = data.week;
+    $('#rsWeek').replaceChildren(...data.weeks.map(w =>
+      el('option', { value: w, selected: w === data.week || null }, `Week ${w}`)));
+    $('#rsState').textContent = data.complete
+      ? `final · median ${num(data.median)}` : 'not final';
+
+    $('#rsBoard').replaceChildren(...(data.games.length
+      ? data.games.map(g => el('div', { class: 'game' + (g.final ? ' final' : '') },
+          el('div', { class: 'gteam' + (g.outcome === 'home' ? ' won' : '') },
+            teamName(g.home)),
+          el('div', { class: 'gscore' },
+            g.final ? num(g.home_points) : num(g.home_projected)),
+          el('div', { class: 'gdash' }, g.final ? '–' : 'proj'),
+          el('div', { class: 'gscore' },
+            g.final ? num(g.away_points) : num(g.away_projected)),
+          el('div', { class: 'gteam' + (g.outcome === 'away' ? ' won' : '') },
+            teamName(g.away))))
+      : [el('div', { class: 'hint' }, 'No fixtures for this week.')]));
+
+    renderScoreForm(data.recorded || {});
+  }
+
+  function renderScoreForm(recorded) {
+    const inputs = teams.map(t => el('label', {}, t.name,
+      el('input', {
+        type: 'number', step: '0.01', class: 'scorein',
+        'data-team': t.id, value: recorded[t.id] ?? '',
+      })));
+    $('#rsScoreForm').replaceChildren(
+      el('div', { class: 'fields' }, ...inputs),
+      el('button', {
+        class: 'btn primary', type: 'button',
+        onclick: async () => {
+          const scores = {};
+          $$('#rsScoreForm .scorein').forEach(input => {
+            if (input.value !== '') scores[input.dataset.team] = Number(input.value);
+          });
+          try {
+            await api(`/api/league/${id}/scores?week=${State.week}`,
+              { method: 'POST', body: { scores } });
+          } catch (err) { toast(err.message, true); return; }
+          toast('Scores saved');
+          await Promise.all([loadBoard(), loadStandings()]);
+        },
+      }, 'Save week ' + State.week));
+  }
+
+  async function loadStandings() {
+    let data;
+    try { data = await api(`/api/league/${id}/standings`); }
+    catch (err) { toast(err.message, true); return; }
+
+    $('#rsTiebreak').textContent =
+      `Top ${data.playoff_teams} make the playoffs (weeks ` +
+      `${data.playoff_weeks.join(', ')}). Ties broken on ${data.tiebreaker}.`;
+
+    $('#rsStandings').replaceChildren(
+      el('div', { class: 'srow head' },
+        el('span', {}, '#'), el('div', {}, 'Team'), el('span', {}, 'Record'),
+        el('span', {}, 'PF'), el('span', {}, 'PA'), el('span', {}, 'Streak')),
+      ...data.standings.map(r => el('div', {
+        class: 'srow' + (r.in_playoffs ? ' playoff' : '')
+             + (r.team_id === data.my_team_id ? ' mine' : ''),
+      },
+        el('span', {}, r.rank),
+        el('div', {}, teamName(r.team_id)),
+        el('span', {}, r.games_played ? r.record : '—'),
+        el('span', {}, num(r.points_for, 0)),
+        el('span', {}, num(r.points_against, 0)),
+        el('span', {}, r.streak))));
+  }
+
+  async function loadActivity() {
+    let data;
+    try { data = await api(`/api/league/${id}/transactions`); }
+    catch (err) { toast(err.message, true); return; }
+
+    $('#rsChased').replaceChildren(...(data.positions_chased.length
+      ? [el('div', { class: 'hint' }, 'The league is buying: '),
+         ...data.positions_chased.map(p =>
+           el('span', { class: 'pill' }, `${p.pos} ×${p.adds}`))]
+      : []));
+
+    $('#rsFeed').replaceChildren(...(data.feed.length
+      ? data.feed.map(t => el('div', { class: 'frow' },
+          el('span', { class: 'pill' }, t.week ? `wk ${t.week}` : '—'),
+          el('div', {}, t.summary),
+          el('button', {
+            class: 'btn ghost tiny', type: 'button', title: 'Undo this move',
+            onclick: async () => {
+              try { await api(`/api/league/${id}/transactions/${t.id}`, { method: 'DELETE' }); }
+              catch (err) { toast(err.message, true); return; }
+              await loadActivity();
+            },
+          }, '×')))
+      : [el('div', { class: 'hint' }, 'No moves recorded yet.')]));
+  }
+
+  function setupMover() {
+    const options = teams.map(t => el('option', { value: t.id }, t.name));
+    $('#mvTeam').replaceChildren(...options);
+    $('#mvTeam').value = State.league.my_team_id || teams[0]?.id || '';
+    $('#mvPartner').replaceChildren(...teams.map(t => el('option', { value: t.id }, t.name)));
+    $('#mvType').onchange = () => {
+      $('#mvPartnerWrap').hidden = $('#mvType').value !== 'trade';
+    };
+
+    $('#btnMove').onclick = async () => {
+      const ids = await resolvePlayers([$('#mvAdds').value, $('#mvDrops').value]);
+      if (ids.problems.length) { showProblems('#mvProblems', ids.problems); return; }
+      showProblems('#mvProblems', []);
+
+      const body = {
+        type: $('#mvType').value,
+        team_id: $('#mvTeam').value,
+        adds: ids.groups[0],
+        drops: ids.groups[1],
+        week: State.week,
+        faab: $('#mvFaab').value === '' ? null : Number($('#mvFaab').value),
+      };
+      if (body.type === 'trade') body.partner_team_id = $('#mvPartner').value;
+
+      try { await api(`/api/league/${id}/transactions`, { method: 'POST', body }); }
+      catch (err) { showProblems('#mvProblems', [err.message]); return; }
+      toast('Move recorded');
+      $('#mvAdds').value = $('#mvDrops').value = $('#mvFaab').value = '';
+      await loadActivity();
+    };
+  }
+
+  /* Names are what people type; ids are what the API wants. Resolve here and
+     say exactly which name failed rather than silently dropping it. */
+  async function resolvePlayers(fields) {
+    if (!State.pool.length) {
+      const data = await api(`/api/league/${id}/players?limit=2000`);
+      State.pool = data.players;
+    }
+    const index = new Map(State.pool.map(p => [p.name.toLowerCase(), p.player_id]));
+    const problems = [];
+    const groups = fields.map(text => (text || '')
+      .split(',').map(s => s.trim()).filter(Boolean)
+      .map(name => {
+        const found = index.get(name.toLowerCase());
+        if (!found) problems.push(`No player called "${name}" in the pool.`);
+        return found;
+      })
+      .filter(Boolean));
+    return { groups, problems };
   }
 }
 
