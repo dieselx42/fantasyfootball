@@ -42,7 +42,46 @@ CREATE TABLE IF NOT EXISTS saved_trades (
     created   TEXT NOT NULL,
     payload   TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS week_scores (
+    league_id TEXT NOT NULL,
+    week      INTEGER NOT NULL,
+    team_id   TEXT NOT NULL,
+    points    REAL NOT NULL,
+    PRIMARY KEY (league_id, week, team_id)
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id         TEXT NOT NULL,
+    type              TEXT NOT NULL,
+    team_id           TEXT NOT NULL,
+    partner_team_id   TEXT,
+    week              INTEGER,
+    date              TEXT,
+    adds              TEXT NOT NULL DEFAULT '[]',
+    drops             TEXT NOT NULL DEFAULT '[]',
+    faab              REAL,
+    note              TEXT
+);
+
+CREATE TABLE IF NOT EXISTS player_status (
+    league_id TEXT NOT NULL,
+    week      INTEGER NOT NULL,
+    player_id TEXT NOT NULL,
+    status    TEXT NOT NULL,
+    PRIMARY KEY (league_id, week, player_id)
+);
 """
+
+
+def _txn_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    """SQLite stores the two player lists as JSON text; unpack them here so
+    callers never see the encoding."""
+    row.pop("league_id", None)
+    row["adds"] = json.loads(row.get("adds") or "[]")
+    row["drops"] = json.loads(row.get("drops") or "[]")
+    return row
 
 
 class FileBackend(Backend):
@@ -213,6 +252,129 @@ class FileBackend(Backend):
             {"id": r["id"], "created": r["created"], **json.loads(r["payload"])}
             for r in rows
         ]
+
+    # -- weekly scores ----------------------------------------------------
+
+    def load_scores(self, league_id: str) -> dict[int, dict[str, float]]:
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT week, team_id, points FROM week_scores"
+                " WHERE league_id = ? ORDER BY week",
+                (league_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        out: dict[int, dict[str, float]] = {}
+        for row in rows:
+            out.setdefault(int(row["week"]), {})[row["team_id"]] = float(row["points"])
+        return out
+
+    def set_week_scores(
+        self, league_id: str, week: int, scores: dict[str, float]
+    ) -> None:
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute(
+                    "DELETE FROM week_scores WHERE league_id = ? AND week = ?",
+                    (league_id, int(week)),
+                )
+                conn.executemany(
+                    "INSERT INTO week_scores (league_id, week, team_id, points)"
+                    " VALUES (?,?,?,?)",
+                    [
+                        (league_id, int(week), team_id, float(points))
+                        for team_id, points in scores.items()
+                    ],
+                )
+        finally:
+            conn.close()
+
+    # -- transactions -----------------------------------------------------
+
+    def list_transactions(self, league_id: str) -> list[dict[str, Any]]:
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM transactions WHERE league_id = ? ORDER BY id",
+                (league_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [_txn_from_row(dict(row)) for row in rows]
+
+    def add_transaction(self, league_id: str, txn: dict[str, Any]) -> int:
+        conn = self._conn()
+        try:
+            with conn:
+                cur = conn.execute(
+                    "INSERT INTO transactions (league_id, type, team_id,"
+                    " partner_team_id, week, date, adds, drops, faab, note)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        league_id,
+                        txn.get("type", "add"),
+                        txn.get("team_id", ""),
+                        txn.get("partner_team_id"),
+                        txn.get("week"),
+                        txn.get("date", ""),
+                        json.dumps(list(txn.get("adds") or [])),
+                        json.dumps(list(txn.get("drops") or [])),
+                        txn.get("faab"),
+                        txn.get("note", ""),
+                    ),
+                )
+            return int(cur.lastrowid or 0)
+        finally:
+            conn.close()
+
+    def delete_transaction(self, league_id: str, txn_id: int) -> bool:
+        conn = self._conn()
+        try:
+            with conn:
+                cur = conn.execute(
+                    "DELETE FROM transactions WHERE league_id = ? AND id = ?",
+                    (league_id, int(txn_id)),
+                )
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    # -- weekly player status ---------------------------------------------
+
+    def load_statuses(self, league_id: str, week: int) -> dict[str, str]:
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT player_id, status FROM player_status"
+                " WHERE league_id = ? AND week = ?",
+                (league_id, int(week)),
+            ).fetchall()
+        finally:
+            conn.close()
+        return {row["player_id"]: row["status"] for row in rows}
+
+    def set_status(
+        self, league_id: str, week: int, player_id: str, status: str
+    ) -> None:
+        conn = self._conn()
+        try:
+            with conn:
+                if not status:
+                    conn.execute(
+                        "DELETE FROM player_status"
+                        " WHERE league_id = ? AND week = ? AND player_id = ?",
+                        (league_id, int(week), player_id),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO player_status"
+                        " (league_id, week, player_id, status) VALUES (?,?,?,?)",
+                        (league_id, int(week), player_id, status),
+                    )
+        finally:
+            conn.close()
 
     # -- projections ------------------------------------------------------
 

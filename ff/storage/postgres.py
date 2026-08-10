@@ -75,6 +75,38 @@ CREATE TABLE IF NOT EXISTS platform_tokens (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (platform, owner_id)
 );
+
+CREATE TABLE IF NOT EXISTS week_scores (
+    league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+    week      INTEGER NOT NULL,
+    team_id   TEXT NOT NULL,
+    points    DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (league_id, week, team_id)
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+    id              BIGSERIAL PRIMARY KEY,
+    league_id       TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+    type            TEXT NOT NULL,
+    team_id         TEXT NOT NULL,
+    partner_team_id TEXT,
+    week            INTEGER,
+    date            TEXT,
+    adds            JSONB NOT NULL DEFAULT '[]'::jsonb,
+    drops           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    faab            DOUBLE PRECISION,
+    note            TEXT
+);
+
+CREATE INDEX IF NOT EXISTS transactions_league_idx ON transactions (league_id, id);
+
+CREATE TABLE IF NOT EXISTS player_status (
+    league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+    week      INTEGER NOT NULL,
+    player_id TEXT NOT NULL,
+    status    TEXT NOT NULL,
+    PRIMARY KEY (league_id, week, player_id)
+);
 """
 
 _schema_lock = threading.Lock()
@@ -300,6 +332,133 @@ class PostgresBackend(Backend):
                 ]
 
         return self._run(op)
+
+    # -- weekly scores ----------------------------------------------------
+
+    def load_scores(self, league_id: str) -> dict[int, dict[str, float]]:
+        def op(conn):
+            with self._cursor(conn) as cur:
+                cur.execute(
+                    "SELECT week, team_id, points FROM week_scores"
+                    " WHERE league_id = %s ORDER BY week",
+                    (league_id,),
+                )
+                rows = cur.fetchall()
+            out: dict[int, dict[str, float]] = {}
+            for row in rows:
+                out.setdefault(int(row["week"]), {})[row["team_id"]] = float(
+                    row["points"]
+                )
+            return out
+
+        return self._run(op)
+
+    def set_week_scores(
+        self, league_id: str, week: int, scores: dict[str, float]
+    ) -> None:
+        def op(conn):
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM week_scores WHERE league_id = %s AND week = %s",
+                    (league_id, int(week)),
+                )
+                if scores:
+                    cur.executemany(
+                        "INSERT INTO week_scores (league_id, week, team_id, points)"
+                        " VALUES (%s,%s,%s,%s)",
+                        [
+                            (league_id, int(week), team_id, float(points))
+                            for team_id, points in scores.items()
+                        ],
+                    )
+
+        self._run(op)
+
+    # -- transactions -----------------------------------------------------
+
+    def list_transactions(self, league_id: str) -> list[dict[str, Any]]:
+        def op(conn):
+            with self._cursor(conn) as cur:
+                cur.execute(
+                    "SELECT id, type, team_id, partner_team_id, week, date,"
+                    " adds, drops, faab, note FROM transactions"
+                    " WHERE league_id = %s ORDER BY id",
+                    (league_id,),
+                )
+                return [dict(r) for r in cur.fetchall()]
+
+        return self._run(op)
+
+    def add_transaction(self, league_id: str, txn: dict[str, Any]) -> int:
+        def op(conn):
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO transactions (league_id, type, team_id,"
+                    " partner_team_id, week, date, adds, drops, faab, note)"
+                    " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                    (
+                        league_id,
+                        txn.get("type", "add"),
+                        txn.get("team_id", ""),
+                        txn.get("partner_team_id"),
+                        txn.get("week"),
+                        txn.get("date", ""),
+                        json.dumps(list(txn.get("adds") or [])),
+                        json.dumps(list(txn.get("drops") or [])),
+                        txn.get("faab"),
+                        txn.get("note", ""),
+                    ),
+                )
+                return int(cur.fetchone()[0])
+
+        return self._run(op)
+
+    def delete_transaction(self, league_id: str, txn_id: int) -> bool:
+        def op(conn):
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM transactions WHERE league_id = %s AND id = %s",
+                    (league_id, int(txn_id)),
+                )
+                return cur.rowcount > 0
+
+        return self._run(op)
+
+    # -- weekly player status ---------------------------------------------
+
+    def load_statuses(self, league_id: str, week: int) -> dict[str, str]:
+        def op(conn):
+            with self._cursor(conn) as cur:
+                cur.execute(
+                    "SELECT player_id, status FROM player_status"
+                    " WHERE league_id = %s AND week = %s",
+                    (league_id, int(week)),
+                )
+                return {r["player_id"]: r["status"] for r in cur.fetchall()}
+
+        return self._run(op)
+
+    def set_status(
+        self, league_id: str, week: int, player_id: str, status: str
+    ) -> None:
+        def op(conn):
+            with conn.cursor() as cur:
+                if not status:
+                    cur.execute(
+                        "DELETE FROM player_status"
+                        " WHERE league_id = %s AND week = %s AND player_id = %s",
+                        (league_id, int(week), player_id),
+                    )
+                else:
+                    cur.execute(
+                        "INSERT INTO player_status (league_id, week, player_id, status)"
+                        " VALUES (%s,%s,%s,%s)"
+                        " ON CONFLICT (league_id, week, player_id) DO UPDATE SET"
+                        "   status = EXCLUDED.status",
+                        (league_id, int(week), player_id, status),
+                    )
+
+        self._run(op)
 
     # -- projections ------------------------------------------------------
 

@@ -68,6 +68,47 @@ class Backend:
     def list_trades(self, league_id: str) -> list[dict[str, Any]]:
         raise NotImplementedError
 
+    # -- weekly scores ----------------------------------------------------
+
+    def load_scores(self, league_id: str) -> dict[int, dict[str, float]]:
+        """Every recorded week: ``{week: {team_id: points}}``."""
+        raise NotImplementedError
+
+    def set_week_scores(
+        self, league_id: str, week: int, scores: dict[str, float]
+    ) -> None:
+        """Replace one week's scores. Passing an empty map clears the week."""
+        raise NotImplementedError
+
+    # -- transactions -----------------------------------------------------
+    #
+    # Append-only. Rosters are derived by replaying this log over the draft,
+    # so correcting a mistake is a delete, never a roster rebuild.
+
+    def list_transactions(self, league_id: str) -> list[dict[str, Any]]:
+        """Oldest first, each carrying the id it was stored under."""
+        raise NotImplementedError
+
+    def add_transaction(self, league_id: str, txn: dict[str, Any]) -> int:
+        raise NotImplementedError
+
+    def delete_transaction(self, league_id: str, txn_id: int) -> bool:
+        raise NotImplementedError
+
+    # -- weekly player status ---------------------------------------------
+    #
+    # The Sunday-morning path: a player is ruled out at 11:28 and the lineup
+    # has to re-solve without re-importing a projection file.
+
+    def load_statuses(self, league_id: str, week: int) -> dict[str, str]:
+        raise NotImplementedError
+
+    def set_status(
+        self, league_id: str, week: int, player_id: str, status: str
+    ) -> None:
+        """Store an override, or clear it when ``status`` is empty."""
+        raise NotImplementedError
+
     # -- projections ------------------------------------------------------
     #
     # Stored as the raw CSV text under a name, exactly as uploaded. Parsing

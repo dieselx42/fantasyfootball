@@ -118,6 +118,49 @@ create table if not exists league_kv (
   primary key (league_id, key)
 );
 
+-- ---------------------------------------------------------------- in-season
+
+-- What each team actually scored, week by week. Standings are derived from
+-- this rather than stored, so a corrected score fixes the table everywhere.
+create table if not exists week_scores (
+  league_id uuid not null references leagues (id) on delete cascade,
+  week      integer not null,
+  team_id   text not null,
+  points    numeric not null,
+  primary key (league_id, week, team_id)
+);
+
+-- Append-only roster moves for every team, not just yours. Current rosters
+-- are produced by replaying this over the draft result, which is why a
+-- mistyped add is fixed by deleting one row.
+create table if not exists transactions (
+  id              bigserial primary key,
+  league_id       uuid not null references leagues (id) on delete cascade,
+  type            text not null
+                    check (type in ('add', 'drop', 'add_drop', 'waiver', 'trade')),
+  team_id         text not null,
+  partner_team_id text,                            -- trades only
+  week            integer,
+  date            text,
+  adds            jsonb not null default '[]'::jsonb,
+  drops           jsonb not null default '[]'::jsonb,
+  faab            numeric,
+  note            text
+);
+
+create index if not exists transactions_league_idx on transactions (league_id, id);
+
+-- Late-breaking availability, per week. Overrides whatever the imported
+-- projections said, so an 11:28am inactive report re-solves the lineup
+-- without a re-import.
+create table if not exists player_status (
+  league_id uuid not null references leagues (id) on delete cascade,
+  week      integer not null,
+  player_id text not null,
+  status    text not null,
+  primary key (league_id, week, player_id)
+);
+
 -- ---------------------------------------------------------------- projections
 
 -- Replaces the shared data/projections directory. Scoped to an owner, and
@@ -167,6 +210,9 @@ alter table picks            enable row level security;
 alter table rosters          enable row level security;
 alter table saved_trades     enable row level security;
 alter table league_kv        enable row level security;
+alter table week_scores      enable row level security;
+alter table transactions     enable row level security;
+alter table player_status    enable row level security;
 alter table projection_sets  enable row level security;
 alter table platform_tokens  enable row level security;
 
@@ -229,6 +275,12 @@ create policy "league scoped" on rosters
 create policy "league scoped" on saved_trades
   for all using (can_access_league(league_id)) with check (can_access_league(league_id));
 create policy "league scoped" on league_kv
+  for all using (can_access_league(league_id)) with check (can_access_league(league_id));
+create policy "league scoped" on week_scores
+  for all using (can_access_league(league_id)) with check (can_access_league(league_id));
+create policy "league scoped" on transactions
+  for all using (can_access_league(league_id)) with check (can_access_league(league_id));
+create policy "league scoped" on player_status
   for all using (can_access_league(league_id)) with check (can_access_league(league_id));
 
 create policy "own projections" on projection_sets

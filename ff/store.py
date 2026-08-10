@@ -7,10 +7,11 @@ database driver.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from .draft import Pick
 from .storage import get_backend
+from .transactions import Transaction, apply_to_rosters
 
 
 def _pick_from_row(row: dict[str, Any]) -> Pick:
@@ -72,3 +73,58 @@ def save_trade(league_id: str, payload: dict[str, Any], created: str) -> int:
 
 def list_trades(league_id: str) -> list[dict[str, Any]]:
     return get_backend().list_trades(league_id)
+
+
+# --- weekly scores -------------------------------------------------------
+
+def load_scores(league_id: str) -> dict[int, dict[str, float]]:
+    return get_backend().load_scores(league_id)
+
+
+def set_week_scores(league_id: str, week: int, scores: Mapping[str, float]) -> None:
+    get_backend().set_week_scores(league_id, int(week), dict(scores))
+
+
+# --- transactions --------------------------------------------------------
+
+def list_transactions(league_id: str) -> list[Transaction]:
+    return [
+        Transaction.from_dict(row) for row in get_backend().list_transactions(league_id)
+    ]
+
+
+def add_transaction(league_id: str, txn: Transaction) -> int:
+    return get_backend().add_transaction(league_id, txn.to_dict())
+
+
+def delete_transaction(league_id: str, txn_id: int) -> bool:
+    return get_backend().delete_transaction(league_id, int(txn_id))
+
+
+# --- weekly player status ------------------------------------------------
+
+def load_statuses(league_id: str, week: int) -> dict[str, str]:
+    return get_backend().load_statuses(league_id, int(week))
+
+
+def set_status(league_id: str, week: int, player_id: str, status: str) -> None:
+    get_backend().set_status(league_id, int(week), player_id, status)
+
+
+# --- current rosters -----------------------------------------------------
+
+def current_roster_ids(league_id: str) -> dict[str, list[str]]:
+    """Who owns whom right now.
+
+    Stored rosters are the post-draft snapshot; the transaction log is
+    replayed over them so an add made three weeks ago is reflected without
+    anyone having re-entered a roster. Falls back to the draft board while the
+    draft is still in progress.
+    """
+    base = load_rosters(league_id)
+    if not base:
+        base = {}
+        for pick in load_picks(league_id):
+            if pick.player_id:
+                base.setdefault(pick.team_id, []).append(pick.player_id)
+    return apply_to_rosters(base, list_transactions(league_id))

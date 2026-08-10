@@ -40,7 +40,8 @@ def postgres_backend():
             with conn.cursor() as cur:
                 cur.execute(
                     "TRUNCATE leagues, picks, rosters, saved_trades,"
-                    " projection_sets, platform_tokens RESTART IDENTITY CASCADE"
+                    " projection_sets, platform_tokens, week_scores,"
+                    " transactions, player_status RESTART IDENTITY CASCADE"
                 )
         backend._run(clear)
         return backend
@@ -160,6 +161,86 @@ class BackendContract:
         rows = self.backend.list_trades(cfg["id"])
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["verdict"], "favors-you")
+
+    # -- weekly scores ----------------------------------------------------
+
+    def test_week_scores_round_trip(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        self.backend.set_week_scores(cfg["id"], 1, {"team-1": 118.4, "team-2": 96.0})
+        self.backend.set_week_scores(cfg["id"], 2, {"team-1": 101.5})
+        scores = self.backend.load_scores(cfg["id"])
+        self.assertEqual(scores[1]["team-1"], 118.4)
+        self.assertEqual(sorted(scores), [1, 2])
+
+    def test_saving_a_week_replaces_it(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        self.backend.set_week_scores(cfg["id"], 1, {"team-1": 100.0, "team-2": 90.0})
+        self.backend.set_week_scores(cfg["id"], 1, {"team-1": 105.0})
+        self.assertEqual(self.backend.load_scores(cfg["id"])[1], {"team-1": 105.0})
+
+    def test_an_empty_week_clears_it(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        self.backend.set_week_scores(cfg["id"], 1, {"team-1": 100.0})
+        self.backend.set_week_scores(cfg["id"], 1, {})
+        self.assertEqual(self.backend.load_scores(cfg["id"]), {})
+
+    # -- transactions -----------------------------------------------------
+
+    def test_transactions_round_trip_oldest_first(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        first = self.backend.add_transaction(cfg["id"], {
+            "type": "add_drop", "team_id": "team-1", "adds": ["a"], "drops": ["b"],
+            "week": 3, "date": "2026-09-22", "faab": 12.0, "note": "",
+        })
+        second = self.backend.add_transaction(cfg["id"], {
+            "type": "trade", "team_id": "team-1", "partner_team_id": "team-2",
+            "adds": ["c"], "drops": ["d"], "week": 4,
+        })
+        rows = self.backend.list_transactions(cfg["id"])
+        self.assertEqual([r["id"] for r in rows], [first, second])
+        # The player lists survive as lists, whatever the column type is.
+        self.assertEqual(rows[0]["adds"], ["a"])
+        self.assertEqual(rows[0]["drops"], ["b"])
+        self.assertEqual(float(rows[0]["faab"]), 12.0)
+        self.assertEqual(rows[1]["partner_team_id"], "team-2")
+
+    def test_deleting_a_transaction_reports_whether_it_existed(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        txn_id = self.backend.add_transaction(cfg["id"], {
+            "type": "add", "team_id": "team-1", "adds": ["a"]})
+        self.assertTrue(self.backend.delete_transaction(cfg["id"], txn_id))
+        self.assertFalse(self.backend.delete_transaction(cfg["id"], txn_id))
+        self.assertEqual(self.backend.list_transactions(cfg["id"]), [])
+
+    # -- weekly player status ---------------------------------------------
+
+    def test_status_round_trip_is_scoped_to_one_week(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        self.backend.set_status(cfg["id"], 3, "bijan-robinson-RB", "O")
+        self.assertEqual(self.backend.load_statuses(cfg["id"], 3),
+                         {"bijan-robinson-RB": "O"})
+        # Next week starts clean; an injury note must not leak forward.
+        self.assertEqual(self.backend.load_statuses(cfg["id"], 4), {})
+
+    def test_an_empty_status_clears_the_override(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        self.backend.set_status(cfg["id"], 3, "player-RB", "O")
+        self.backend.set_status(cfg["id"], 3, "player-RB", "")
+        self.assertEqual(self.backend.load_statuses(cfg["id"], 3), {})
+
+    def test_setting_a_status_twice_updates_it(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        self.backend.set_status(cfg["id"], 3, "player-RB", "Q")
+        self.backend.set_status(cfg["id"], 3, "player-RB", "O")
+        self.assertEqual(self.backend.load_statuses(cfg["id"], 3), {"player-RB": "O"})
 
     # -- projections ------------------------------------------------------
 
