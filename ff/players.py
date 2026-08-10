@@ -26,6 +26,10 @@ COLUMN_ALIASES: dict[str, str] = {
     "team": "team", "tm": "team", "nfl team": "team",
     "pos": "pos", "position": "pos",
     "bye": "bye", "bye week": "bye",
+    "week": "week", "wk": "week",
+    "opp": "opponent", "opponent": "opponent", "vs": "opponent",
+    "status": "status", "injury": "status", "injury status": "status",
+    "game status": "status", "practice status": "status",
     "adp": "adp", "avg pick": "adp", "average draft position": "adp",
     "rank": "rank", "ovr": "rank", "overall": "rank",
     "tier": "tier",
@@ -60,6 +64,50 @@ COLUMN_ALIASES: dict[str, str] = {
 _SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
 TEAM_FIXES = {"JAX": "JAC", "WSH": "WAS", "LA": "LAR", "OAK": "LV", "SD": "LAC", "STL": "LAR"}
+
+#: Availability codes, canonicalised from the many spellings sites use.
+#: ``BYE`` is derived rather than reported, but shares the same vocabulary so
+#: one field answers "can I start this player?".
+STATUS_ALIASES = {
+    "": "", "a": "", "active": "", "healthy": "", "p": "", "probable": "",
+    "q": "Q", "questionable": "Q", "gtd": "Q", "game time decision": "Q",
+    "d": "D", "doubtful": "D",
+    "o": "O", "out": "O", "inactive": "O",
+    "ir": "IR", "injured reserve": "IR", "ir-r": "IR", "pup": "IR", "nfi": "IR",
+    "sus": "SUS", "susp": "SUS", "suspended": "SUS",
+    "na": "NA", "n/a": "NA", "not active": "NA",
+    "bye": "BYE",
+}
+
+#: What share of a player's projection survives their status. Questionable
+#: players do play, usually on reduced snaps; doubtful ones rarely do. Out,
+#: IR and suspended score nothing, which is what makes the lineup optimiser
+#: bench them without any special-case code.
+STATUS_MULTIPLIERS = {
+    "": 1.0, "Q": 0.92, "D": 0.25,
+    "O": 0.0, "IR": 0.0, "SUS": 0.0, "NA": 0.0, "BYE": 0.0,
+}
+
+
+def normalize_status(status: str) -> str:
+    key = re.sub(r"\s+", " ", (status or "").strip().lower())
+    if key in STATUS_ALIASES:
+        return STATUS_ALIASES[key]
+    upper = key.upper()
+    return upper if upper in STATUS_MULTIPLIERS else ""
+
+
+def status_multiplier(status: str, cfg: Mapping[str, Any] | None = None) -> float:
+    """How much of a projection a status leaves behind.
+
+    Overridable per league under ``valuation.status_multipliers`` — some people
+    want a questionable player treated as fully available, some want zero.
+    """
+    overrides = ((cfg or {}).get("valuation") or {}).get("status_multipliers") or {}
+    code = normalize_status(status)
+    if code in overrides:
+        return float(overrides[code])
+    return STATUS_MULTIPLIERS.get(code, 1.0)
 
 
 def normalize_name(name: str) -> str:
@@ -102,10 +150,23 @@ class Player:
     rank: int | None = None
     tier: int | None = None
     source: str = ""
+    # Weekly context. ``week`` is None for a season-long projection.
+    week: int | None = None
+    status: str = ""
+    opponent: str = ""
+    #: The season-long projection this player's weekly number came from, kept
+    #: alongside it so one list answers both "best lineup this week" and "best
+    #: player to hold" without a parallel data structure.
+    season_points: float = 0.0
     # Filled in by the valuation engine.
     vor: float = 0.0
     pos_rank: int = 0
     value_tier: int = 0
+
+    @property
+    def playable(self) -> bool:
+        """Whether starting this player could score anything at all."""
+        return STATUS_MULTIPLIERS.get(self.status, 1.0) > 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -122,6 +183,11 @@ class Player:
             "pos_rank": self.pos_rank,
             "value_tier": self.value_tier,
             "source": self.source,
+            "week": self.week,
+            "status": self.status,
+            "opponent": self.opponent,
+            "season_points": round(self.season_points, 2),
+            "playable": self.playable,
             "stats": self.stats,
         }
 
@@ -210,6 +276,9 @@ def parse_projection_csv(text: str, source: str = "csv") -> list[Player]:
                 rank=_as_int(record.get("rank")),
                 tier=_as_int(record.get("tier")),
                 source=source,
+                week=_as_int(record.get("week")),
+                status=normalize_status(str(record.get("status", ""))),
+                opponent=str(record.get("opponent", "")).strip().upper(),
             )
         )
 
@@ -253,15 +322,20 @@ def score_pool(players: Iterable[Player], cfg: Mapping[str, Any]) -> list[Player
 
 
 def merge_pools(*pools: Iterable[Player]) -> list[Player]:
-    """Combine sources, first pool wins on conflict, later ones fill gaps."""
-    merged: dict[str, Player] = {}
+    """Combine sources, first pool wins on conflict, later ones fill gaps.
+
+    Keyed by player *and week*, so a season-long file and a week 3 file can
+    both be loaded without one overwriting the other.
+    """
+    merged: dict[tuple[str, int | None], Player] = {}
     for pool in pools:
         for player in pool:
-            existing = merged.get(player.player_id)
+            key = (player.player_id, player.week)
+            existing = merged.get(key)
             if existing is None:
-                merged[player.player_id] = player
+                merged[key] = player
                 continue
-            for attr in ("team", "bye", "adp", "rank", "tier"):
+            for attr in ("team", "bye", "adp", "rank", "tier", "status", "opponent"):
                 if getattr(existing, attr) in (None, "", 0):
                     setattr(existing, attr, getattr(player, attr))
             if not existing.stats and player.stats:
@@ -278,23 +352,30 @@ def available_projection_files() -> list[Path]:
     return sorted(PROJECTIONS_DIR.glob("*.csv"))
 
 
-def load_projections(paths: Iterable[Path] | None = None) -> list[Player]:
+def load_projections(
+    paths: Iterable[Path] | None = None, week: int | None = None
+) -> list[Player]:
     """Every stored projection set, merged.
 
     With no argument this reads through the active storage backend, so it
     works identically against local CSVs and a hosted database.
+
+    ``week`` selects which rows come back. The default, ``None``, returns only
+    season-long rows — a file with no ``week`` column behaves exactly as it
+    always has. Passing a number returns only rows carrying that week.
     """
     if paths is not None:
         pools = [
             parse_projection_csv(p.read_text(encoding="utf-8"), p.stem)
             for p in paths
         ]
-        return merge_pools(*pools) if pools else []
+    else:
+        from .storage import get_backend
 
-    from .storage import get_backend
+        pools = [
+            parse_projection_csv(text, name)
+            for name, text in get_backend().load_projection_texts()
+        ]
 
-    pools = [
-        parse_projection_csv(text, name)
-        for name, text in get_backend().load_projection_texts()
-    ]
-    return merge_pools(*pools) if pools else []
+    merged = merge_pools(*pools) if pools else []
+    return [p for p in merged if p.week == week]
