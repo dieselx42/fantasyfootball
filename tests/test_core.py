@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from ff import config as C
 from ff import trades
@@ -197,6 +200,38 @@ class TestRealLeagueConfig(unittest.TestCase):
         self.assertEqual(len(ids), 10)
         self.assertEqual(len(set(ids)), 10)
         self.assertTrue(all(ids), "every team needs a non-empty id")
+
+
+class TestPaths(unittest.TestCase):
+    """Data locations must be overridable, so two leagues (and later, two
+    users) can run against separate data without colliding."""
+
+    def test_env_override_redirects_every_write_path(self):
+        import importlib
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "FF_DATA_DIR": os.path.join(tmp, "data"),
+                "FF_LEAGUES_DIR": os.path.join(tmp, "leagues"),
+                "FF_SECRETS_DIR": os.path.join(tmp, "secrets"),
+            }
+            with mock.patch.dict(os.environ, env, clear=False):
+                paths = importlib.reload(importlib.import_module("ff.paths"))
+                self.assertTrue(str(paths.LEAGUES_DIR).startswith(tmp))
+                self.assertTrue(str(paths.DATA_DIR).startswith(tmp))
+                self.assertTrue(str(paths.DB_PATH).startswith(tmp))
+                # Projections default *under* the overridden data dir.
+                self.assertTrue(str(paths.PROJECTIONS_DIR).startswith(tmp))
+                self.assertTrue(paths.describe()["custom"])
+
+        # Restore the module so later tests see the real directories.
+        importlib.reload(importlib.import_module("ff.paths"))
+
+    def test_defaults_live_in_the_repo(self):
+        import ff.paths as paths
+
+        self.assertEqual(paths.LEAGUES_DIR, paths.ROOT / "leagues")
+        self.assertEqual(paths.DB_PATH, paths.ROOT / "data" / "fantasy.db")
 
 
 class TestProjectionImport(unittest.TestCase):

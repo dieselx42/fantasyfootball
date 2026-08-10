@@ -25,9 +25,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
 from typing import Any
 
+from ..paths import SECRETS_DIR
 from ..players import Player, make_player_id, normalize_pos, normalize_team
 from .base import PlatformAdapter, PlatformError
 
@@ -37,7 +37,6 @@ API_BASE = "https://fantasysports.yahooapis.com/fantasy/v2"
 REDIRECT_URI = "oob"
 TIMEOUT = 25
 
-SECRETS_DIR = Path(__file__).resolve().parent.parent.parent / "secrets"
 TOKEN_PATH = SECRETS_DIR / "yahoo.token.json"
 
 #: Yahoo's game key for NFL changes each season; ``nfl`` resolves to current.

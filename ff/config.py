@@ -16,9 +16,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping
 
+from .paths import LEAGUES_DIR
 from .scoring_vocab import is_stat
-
-LEAGUES_DIR = Path(__file__).resolve().parent.parent / "leagues"
 
 #: Positions the valuation engine understands. FLEX-style slots are defined in
 #: the roster block and reference these.

@@ -27,6 +27,28 @@ Tests:
 python3 -m unittest discover -s tests
 ```
 
+### Running more than one instance
+
+Every path the app writes to honours an environment override, so separate
+leagues (or separate people sharing a machine) can run side by side without
+touching each other's data:
+
+```bash
+FF_DATA_DIR=~/ff/keg-south    FF_LEAGUES_DIR=~/ff/keg-south/leagues    python3 run.py --port 8777
+FF_DATA_DIR=~/ff/other-league FF_LEAGUES_DIR=~/ff/other-league/leagues python3 run.py --port 8778
+```
+
+| Variable | Default | Holds |
+| --- | --- | --- |
+| `FF_DATA_DIR` | `./data` | Database and uploaded projections |
+| `FF_LEAGUES_DIR` | `./leagues` | League config JSON |
+| `FF_PROJECTIONS_DIR` | `$FF_DATA_DIR/projections` | Projection CSVs |
+| `FF_DB_PATH` | `$FF_DATA_DIR/fantasy.db` | Season state |
+| `FF_SECRETS_DIR` | `./secrets` | Platform OAuth tokens |
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full stack, what would be
+needed to host this for other people, and the migration plan.
+
 ## First run
 
 The setup wizard asks three things:

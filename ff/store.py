@@ -13,9 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from .draft import Pick
-
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-DB_PATH = DATA_DIR / "fantasy.db"
+from .paths import DATA_DIR, DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS picks (

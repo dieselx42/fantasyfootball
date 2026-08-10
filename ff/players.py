@@ -15,10 +15,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from .paths import PROJECTIONS_DIR
 from .scoring import score_stats
 from .scoring_vocab import ALL_STATS
-
-PROJECTIONS_DIR = Path(__file__).resolve().parent.parent / "data" / "projections"
 
 #: Header aliases seen in the wild -> canonical stat key.
 COLUMN_ALIASES: dict[str, str] = {
