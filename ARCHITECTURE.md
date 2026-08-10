@@ -87,6 +87,54 @@ FF_DATA_DIR=~/ff/other-league FF_LEAGUES_DIR=~/ff/other-league/leagues python3 r
 That is useful today for keeping leagues apart, and it collapses blockers 3–5
 into "change four constants" rather than "grep the codebase for open()".
 
+## Deploying: why Vercel is the wrong shape for this app
+
+Vercel genuinely supports Python — 3.12/3.13/3.14, ASGI and WSGI apps, and
+even plain `BaseHTTPRequestHandler` handlers, which is what `ff/web/server.py`
+already is. The HTTP layer is not the problem.
+
+The problem is that **Vercel functions run on a read-only filesystem with an
+ephemeral `/tmp` that does not survive between invocations.** This app writes
+on every meaningful action:
+
+| What | Where | Storage | On Vercel |
+| --- | --- | --- | --- |
+| League configs | `ff/config.py` `save()` | JSON file per league | read-only FS → `EROFS` |
+| Projection CSVs | `ff/web/server.py` import | uploaded file | read-only FS → `EROFS` |
+| Draft picks | `ff/store.py` `connect()` | SQLite | `/tmp` wiped between calls |
+| Rosters + trades | `ff/store.py` `connect()` | SQLite | `/tmp` wiped between calls |
+| Yahoo tokens | `ff/platforms/yahoo.py` | `secrets/*.json` | read-only FS → `EROFS` |
+
+Every one of them breaks. Saving a league setting would throw; a draft pick
+would vanish before the next request. Serverless is stateless by design, and
+this app is stateful by nature — the draft board *is* accumulated state.
+
+Deploying to Vercel is therefore not "push and go". It requires completing
+phases 1–2 below (swap every store for a hosted database) *before* anything
+works at all. That is real work, and it buys nothing that a container host
+does not already give you.
+
+### The alternative: a container host
+
+Render, Fly.io and Railway all deploy from a git push exactly like Vercel,
+but give you a long-running process and a persistent disk. SQLite keeps
+working, the JSON configs keep working, and the app deploys essentially as it
+stands today — a `Dockerfile` and a mount point.
+
+| | Vercel | Render / Fly / Railway |
+| --- | --- | --- |
+| Deploy from git | yes | yes |
+| Persistent disk | **no** | yes |
+| Long-running process | no | yes |
+| Works with today's code | **no** | yes, nearly as-is |
+| Prerequisite work | phases 1–2 first | a Dockerfile |
+| Cost at this scale | free tier | ~$0–7/month |
+
+**Recommendation: use a container host.** Reach for Vercel only if you also
+want the multi-user rewrite now, since that is the price of admission. If the
+end state is many users, phases 1–2 have to happen eventually either way —
+Vercel just forces them to happen first, before you get anything running.
+
 ## Recommended target stack
 
 **Stay on Python.** The engine is the asset; a rewrite in another language
