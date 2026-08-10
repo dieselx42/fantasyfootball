@@ -46,8 +46,18 @@ FF_DATA_DIR=~/ff/other-league FF_LEAGUES_DIR=~/ff/other-league/leagues python3 r
 | `FF_DB_PATH` | `$FF_DATA_DIR/fantasy.db` | Season state |
 | `FF_SECRETS_DIR` | `./secrets` | Platform OAuth tokens |
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full stack, what would be
-needed to host this for other people, and the migration plan.
+### Hosting
+
+The same codebase runs hosted. Set `DATABASE_URL` and storage switches from
+local files to Postgres; everything else is identical. See
+[DEPLOY.md](DEPLOY.md) for the Vercel + Supabase walkthrough, and
+[ARCHITECTURE.md](ARCHITECTURE.md) for why it is built this way.
+
+| | Local | Hosted |
+| --- | --- | --- |
+| Command | `python3 run.py` | Vercel serverless |
+| Storage | JSON + SQLite | Postgres |
+| Dependencies | none | `psycopg2-binary` |
 
 ## First run
 

@@ -272,14 +272,29 @@ def merge_pools(*pools: Iterable[Player]) -> list[Player]:
 
 
 def available_projection_files() -> list[Path]:
+    """File-backend only; kept for tooling and tests."""
     if not PROJECTIONS_DIR.exists():
         return []
     return sorted(PROJECTIONS_DIR.glob("*.csv"))
 
 
 def load_projections(paths: Iterable[Path] | None = None) -> list[Player]:
-    paths = list(paths) if paths is not None else available_projection_files()
-    pools = []
-    for path in paths:
-        pools.append(parse_projection_csv(path.read_text(encoding="utf-8"), path.stem))
+    """Every stored projection set, merged.
+
+    With no argument this reads through the active storage backend, so it
+    works identically against local CSVs and a hosted database.
+    """
+    if paths is not None:
+        pools = [
+            parse_projection_csv(p.read_text(encoding="utf-8"), p.stem)
+            for p in paths
+        ]
+        return merge_pools(*pools) if pools else []
+
+    from .storage import get_backend
+
+    pools = [
+        parse_projection_csv(text, name)
+        for name, text in get_backend().load_projection_texts()
+    ]
     return merge_pools(*pools) if pools else []

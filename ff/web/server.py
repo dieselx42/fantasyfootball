@@ -20,7 +20,8 @@ from .. import config as cfgmod
 from .. import store, trades
 from ..draft import DraftState, board_summary, recommend
 from ..platforms import PlatformError, adapter_for, describe_all, get_adapter
-from ..players import PROJECTIONS_DIR, parse_projection_csv
+from ..players import parse_projection_csv
+from ..storage import get_backend
 from ..pool import build_pool, index_by_id, invalidate
 from ..roster import describe_lineup, optimal_lineup
 from ..scoring_vocab import STAT_GROUPS
@@ -65,8 +66,6 @@ class Api:
         except cfgmod.ConfigError as exc:
             raise ApiError(str(exc), 404) from exc
 
-    def conn(self):
-        return store.connect()
 
 
 # --------------------------------------------------------------------------
@@ -83,7 +82,8 @@ def bootstrap(api: Api, _params: dict[str, str], _body: dict[str, Any]) -> Any:
             for group, stats in STAT_GROUPS.items()
         },
         "positions": list(cfgmod.POSITIONS),
-        "projection_files": [p.name for p in PROJECTIONS_DIR.glob("*.csv")],
+        "projection_files": [f["name"] for f in get_backend().list_projection_sets()],
+        "storage": get_backend().describe(),
     }
 
 
@@ -225,8 +225,7 @@ def import_projections(api: Api, _params: dict[str, str], body: dict[str, Any]) 
             "with at least a player-name column."
         )
 
-    PROJECTIONS_DIR.mkdir(parents=True, exist_ok=True)
-    (PROJECTIONS_DIR / filename).write_text(text, encoding="utf-8")
+    get_backend().save_projection_set(filename, text)
     invalidate()
 
     with_stats = sum(1 for p in parsed if p.stats)
@@ -240,18 +239,13 @@ def import_projections(api: Api, _params: dict[str, str], body: dict[str, Any]) 
 
 @route("GET", "/api/projections")
 def list_projections(api: Api, _params: dict[str, str], _body: dict[str, Any]) -> Any:
-    files = []
-    for path in sorted(PROJECTIONS_DIR.glob("*.csv")):
-        files.append({"name": path.name, "size": path.stat().st_size})
-    return {"files": files}
+    return {"files": get_backend().list_projection_sets()}
 
 
 @route("DELETE", "/api/projections/<name>")
 def delete_projections(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
-    path = PROJECTIONS_DIR / Path(params["name"]).name
-    if not path.exists():
+    if not get_backend().delete_projection_set(Path(params["name"]).name):
         raise ApiError("No such projection file.", 404)
-    path.unlink()
     invalidate()
     return {"ok": True}
 
@@ -284,10 +278,8 @@ def league_players(api: Api, params: dict[str, str], _body: dict[str, Any]) -> A
 # Draft
 # --------------------------------------------------------------------------
 
-def _draft_state(api: Api, cfg: dict[str, Any]) -> tuple[Any, DraftState]:
-    conn = api.conn()
-    picks = store.load_picks(conn, cfg["id"])
-    return conn, DraftState(cfg, picks)
+def _draft_state(cfg: dict[str, Any]) -> DraftState:
+    return DraftState(cfg, store.load_picks(cfg["id"]))
 
 
 @route("GET", "/api/league/<league_id>/draft")
@@ -295,9 +287,8 @@ def get_draft(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
     if not cfg.get("teams"):
         raise ApiError("Add your teams before starting a draft.")
-    conn, state = _draft_state(api, cfg)
+    state = _draft_state(cfg)
     pool = build_pool(cfg)
-    conn.close()
     return {
         "board": board_summary(state, pool),
         "picks": [p.to_dict() for p in state.slots],
@@ -310,47 +301,40 @@ def get_draft(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
 @route("POST", "/api/league/<league_id>/draft/pick")
 def make_pick(api: Api, params: dict[str, str], body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
-    conn, state = _draft_state(api, cfg)
+    state = _draft_state(cfg)
     pool = build_pool(cfg)
     player = index_by_id(pool).get(body.get("player_id", ""))
     if player is None:
-        conn.close()
         raise ApiError("That player is not in the pool.", 404)
     try:
         pick = state.make_pick(player, body.get("team_id"), body.get("price"))
     except ValueError as exc:
-        conn.close()
         raise ApiError(str(exc)) from exc
-    store.save_picks(conn, cfg["id"], state.slots)
-    conn.close()
+    store.save_picks(cfg["id"], state.slots)
     return {"pick": pick.to_dict()}
 
 
 @route("POST", "/api/league/<league_id>/draft/undo")
 def undo_pick(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
-    conn, state = _draft_state(api, cfg)
+    state = _draft_state(cfg)
     undone = state.undo()
-    store.save_picks(conn, cfg["id"], state.slots)
-    conn.close()
+    store.save_picks(cfg["id"], state.slots)
     return {"undone": undone.to_dict() if undone else None}
 
 
 @route("POST", "/api/league/<league_id>/draft/reset")
 def reset_draft(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
-    conn = api.conn()
-    store.clear_draft(conn, cfg["id"])
-    conn.close()
+    store.clear_draft(cfg["id"])
     return {"ok": True}
 
 
 @route("GET", "/api/league/<league_id>/draft/recommend")
 def draft_recommend(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
-    conn, state = _draft_state(api, cfg)
+    state = _draft_state(cfg)
     pool = build_pool(cfg)
-    conn.close()
 
     clock = state.on_the_clock
     team_id = api.arg("team") or (clock.team_id if clock else cfg.get("my_team_id"))
@@ -372,9 +356,7 @@ def draft_recommend(api: Api, params: dict[str, str], _body: dict[str, Any]) -> 
 def finish_draft(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
     """Freeze the draft into season rosters."""
     cfg = api.load_cfg(params["league_id"])
-    conn = api.conn()
-    count = store.seed_rosters_from_draft(conn, cfg["id"])
-    conn.close()
+    count = store.seed_rosters_from_draft(cfg["id"])
     return {"ok": True, "players": count}
 
 
@@ -384,15 +366,12 @@ def finish_draft(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any
 
 def _rosters(api: Api, cfg: dict[str, Any]) -> dict[str, list[Any]]:
     """Season rosters, falling back to the draft while it is in progress."""
-    conn = api.conn()
-    stored = store.load_rosters(conn, cfg["id"])
+    stored = store.load_rosters(cfg["id"])
     if not stored:
-        picks = store.load_picks(conn, cfg["id"])
         stored = {}
-        for pick in picks:
+        for pick in store.load_picks(cfg["id"]):
             if pick.player_id:
                 stored.setdefault(pick.team_id, []).append(pick.player_id)
-    conn.close()
 
     by_id = index_by_id(build_pool(cfg))
     return {
@@ -420,9 +399,7 @@ def get_rosters(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
 @route("POST", "/api/league/<league_id>/rosters/<team_id>")
 def set_team_roster(api: Api, params: dict[str, str], body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
-    conn = api.conn()
-    store.set_roster(conn, cfg["id"], params["team_id"], body.get("player_ids") or [])
-    conn.close()
+    store.set_roster(cfg["id"], params["team_id"], body.get("player_ids") or [])
     return {"ok": True}
 
 
@@ -493,25 +470,61 @@ def suggest_trades(api: Api, params: dict[str, str], _body: dict[str, Any]) -> A
 @route("POST", "/api/league/<league_id>/trades/save")
 def save_trade(api: Api, params: dict[str, str], body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
-    conn = api.conn()
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    trade_id = store.save_trade(conn, cfg["id"], body.get("trade") or {}, now)
-    conn.close()
+    trade_id = store.save_trade(cfg["id"], body.get("trade") or {}, now)
     return {"id": trade_id}
 
 
 @route("GET", "/api/league/<league_id>/trades/saved")
 def saved_trades(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
-    conn = api.conn()
-    rows = store.list_trades(conn, cfg["id"])
-    conn.close()
-    return {"trades": rows}
+    return {"trades": store.list_trades(cfg["id"])}
 
 
 # --------------------------------------------------------------------------
 # HTTP plumbing
 # --------------------------------------------------------------------------
+
+def dispatch(
+    method: str,
+    path: str,
+    query: dict[str, list[str]],
+    body: dict[str, Any],
+) -> tuple[int, Any]:
+    """Route one request. Transport-agnostic, so the stdlib server and the
+    WSGI adapter share exactly one code path and cannot drift apart."""
+    for route_method, regex, func in _ROUTES:
+        if route_method != method:
+            continue
+        match = regex.match(path)
+        if not match:
+            continue
+        try:
+            return 200, func(Api(query, body), match.groupdict(), body)
+        except ApiError as exc:
+            return exc.status, {"error": str(exc)}
+        except Exception as exc:                    # noqa: BLE001
+            traceback.print_exc()
+            return 500, {"error": f"{type(exc).__name__}: {exc}"}
+    return 404, {"error": f"No route for {method} {path}"}
+
+
+def static_file(path: str) -> tuple[bytes, str] | None:
+    """Read a file from the bundled frontend, or None if it escapes the tree."""
+    rel = "index.html" if path in ("/", "") else path.lstrip("/")
+    target = (STATIC_DIR / rel).resolve()
+    if not str(target).startswith(str(STATIC_DIR.resolve())) or not target.is_file():
+        target = STATIC_DIR / "index.html"
+    content_type = {
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".js": "text/javascript; charset=utf-8",
+        ".json": "application/json",
+        ".svg": "image/svg+xml",
+        ".ico": "image/x-icon",
+    }.get(target.suffix, "application/octet-stream")
+    return target.read_bytes(), content_type
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "FFAssistant"
@@ -548,22 +561,11 @@ class Handler(BaseHTTPRequestHandler):
     def _dispatch(self, method: str, parsed: Any) -> None:
         try:
             body = self._read_body() if method != "GET" else {}
-            for route_method, regex, func in _ROUTES:
-                if route_method != method:
-                    continue
-                match = regex.match(parsed.path)
-                if not match:
-                    continue
-                api = Api(parse_qs(parsed.query), body)
-                result = func(api, match.groupdict(), body)
-                self._json(200, result)
-                return
-            self._json(404, {"error": f"No route for {method} {parsed.path}"})
         except ApiError as exc:
             self._json(exc.status, {"error": str(exc)})
-        except Exception as exc:                       # noqa: BLE001
-            traceback.print_exc()
-            self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            return
+        status, payload = dispatch(method, parsed.path, parse_qs(parsed.query), body)
+        self._json(status, payload)
 
     def _json(self, status: int, payload: Any) -> None:
         body = json.dumps(payload, default=str).encode("utf-8")
@@ -575,19 +577,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_static(self, path: str) -> None:
-        rel = "index.html" if path in ("/", "") else path.lstrip("/")
-        target = (STATIC_DIR / rel).resolve()
-        if not str(target).startswith(str(STATIC_DIR.resolve())) or not target.is_file():
-            target = STATIC_DIR / "index.html"
-        content_type = {
-            ".html": "text/html; charset=utf-8",
-            ".css": "text/css; charset=utf-8",
-            ".js": "text/javascript; charset=utf-8",
-            ".json": "application/json",
-            ".svg": "image/svg+xml",
-        }.get(target.suffix, "application/octet-stream")
-
-        data = target.read_bytes()
+        data, content_type = static_file(path)
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))

@@ -14,7 +14,8 @@ Setup, once:
   2. Paste the Client ID and Client Secret into the setup wizard.
   3. Open the authorize URL it gives you, approve, and paste the code back.
 
-Tokens are written to ``secrets/yahoo.token.json``, which is gitignored.
+Tokens go to the active storage backend: a gitignored file under
+``secrets/`` locally, or a database row when hosted.
 """
 
 from __future__ import annotations
@@ -27,7 +28,6 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from ..paths import SECRETS_DIR
 from ..players import Player, make_player_id, normalize_pos, normalize_team
 from .base import PlatformAdapter, PlatformError
 
@@ -36,8 +36,6 @@ TOKEN_URL = "https://api.login.yahoo.com/oauth2/get_token"
 API_BASE = "https://fantasysports.yahooapis.com/fantasy/v2"
 REDIRECT_URI = "oob"
 TIMEOUT = 25
-
-TOKEN_PATH = SECRETS_DIR / "yahoo.token.json"
 
 #: Yahoo's game key for NFL changes each season; ``nfl`` resolves to current.
 GAME_KEY = "nfl"
@@ -112,20 +110,14 @@ class YahooAdapter(PlatformAdapter):
         return token
 
     def _save_token(self, token: dict[str, Any]) -> None:
-        SECRETS_DIR.mkdir(parents=True, exist_ok=True)
-        TOKEN_PATH.write_text(json.dumps(token, indent=2), encoding="utf-8")
-        try:
-            TOKEN_PATH.chmod(0o600)
-        except OSError:
-            pass
+        from ..storage import get_backend
+
+        get_backend().save_token(self.kind, token)
 
     def _load_token(self) -> dict[str, Any] | None:
-        if not TOKEN_PATH.exists():
-            return None
-        try:
-            return json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return None
+        from ..storage import get_backend
+
+        return get_backend().load_token(self.kind)
 
     def _access_token(self) -> str:
         token = self._load_token()

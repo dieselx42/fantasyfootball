@@ -470,17 +470,24 @@ def team_by_id(cfg: dict[str, Any], team_id: str) -> dict[str, Any] | None:
 
 # --------------------------------------------------------------------------
 # Persistence
+#
+# The schema, defaults and validation above are pure. Only these functions
+# touch storage, and they delegate to the active backend so the same code
+# works against local files or Postgres.
 # --------------------------------------------------------------------------
 
 def config_path(league_id: str) -> Path:
+    """Where a league would live on disk. File backend only; kept for tooling."""
     return LEAGUES_DIR / f"{league_id}.json"
 
 
 def load(league_id: str) -> dict[str, Any]:
-    path = config_path(league_id)
-    if not path.exists():
-        raise ConfigError(f"No league config at {path}")
-    return load_file(path)
+    from .storage import get_backend
+
+    cfg = get_backend().load_league(league_id)
+    if cfg is None:
+        raise ConfigError(f"No league config for '{league_id}'")
+    return migrate(cfg)
 
 
 def load_file(path: Path) -> dict[str, Any]:
@@ -491,36 +498,24 @@ def load_file(path: Path) -> dict[str, Any]:
     return migrate(cfg)
 
 
-def save(cfg: dict[str, Any]) -> Path:
+def save(cfg: dict[str, Any]) -> str:
+    from .storage import get_backend
+
     ensure_valid(cfg)
-    LEAGUES_DIR.mkdir(parents=True, exist_ok=True)
-    path = config_path(cfg["id"])
-    tmp = path.with_suffix(".json.tmp")
-    with tmp.open("w", encoding="utf-8") as handle:
-        json.dump(cfg, handle, indent=2, sort_keys=False)
-        handle.write("\n")
-    tmp.replace(path)
-    return path
+    get_backend().save_league(cfg)
+    return cfg["id"]
+
+
+def delete(league_id: str) -> None:
+    from .storage import get_backend
+
+    get_backend().delete_league(league_id)
 
 
 def list_leagues() -> list[dict[str, str]]:
-    if not LEAGUES_DIR.exists():
-        return []
-    out = []
-    for path in sorted(LEAGUES_DIR.glob("*.json")):
-        try:
-            cfg = load_file(path)
-        except (ConfigError, json.JSONDecodeError):
-            continue
-        out.append(
-            {
-                "id": cfg.get("id", path.stem),
-                "name": cfg.get("name", path.stem),
-                "platform": (cfg.get("platform") or {}).get("kind", "manual"),
-                "teams": str(len(cfg.get("teams") or [])),
-            }
-        )
-    return out
+    from .storage import get_backend
+
+    return get_backend().list_leagues()
 
 
 def migrate(cfg: dict[str, Any]) -> dict[str, Any]:

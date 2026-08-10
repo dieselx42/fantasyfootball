@@ -1,5 +1,11 @@
 -- Multi-user schema for the fantasy assistant.
 --
+-- NOT REQUIRED FOR THE CURRENT DEPLOY. The app creates its own (simpler,
+-- single-tenant) tables on first use -- see ff/storage/postgres.py. This file
+-- is the *target* for adding Google sign-in: it introduces owner_id, league
+-- membership and row-level security. Keep it as the design for that work;
+-- running it today would create a second, unused set of tables.
+--
 -- Target: Supabase (Postgres + Google sign-in + row level security).
 -- Paste into the Supabase SQL editor, or run with psql against any Postgres
 -- if you supply your own `auth.users` equivalent.

@@ -1,0 +1,6 @@
+# Hosting only. Running locally with `python3 run.py` needs nothing at all --
+# the app and its engine are pure standard library.
+#
+# psycopg2 is required only by the Postgres storage backend, which activates
+# when DATABASE_URL is set (i.e. on Vercel, where the filesystem is read-only).
+psycopg2-binary==2.9.9
