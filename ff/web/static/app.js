@@ -931,6 +931,71 @@ async function viewPlayers() {
  * adding a platform never means touching this file.
  * ================================================================== */
 
+/* Connecting an *existing* league. The setup wizard collects these too, but a
+   league created before you had credentials — or one whose token expired —
+   had nowhere to enter them, which is every league by the time you get round
+   to connecting one. */
+function renderConnectionPanel(league) {
+  const box = $('#connFields');
+  if (!box) return;
+
+  const kind = league.platform.kind;
+  const spec = State.boot.platforms.find(p => p.kind === kind);
+  const settings = league.platform.settings;
+
+  if (!spec?.fields?.length) {
+    box.replaceChildren(el('div', { class: 'hint' },
+      `${spec?.label || kind} needs no credentials.`));
+    $('#connAuth').hidden = true;
+    return;
+  }
+
+  box.replaceChildren(...spec.fields.map(f => el('label', {}, f.label,
+    el('input', {
+      type: f.key.includes('secret') ? 'password' : 'text',
+      placeholder: f.help,
+      // Credentials are write-only: they live in the secret store and the
+      // server never sends them back, so an empty box means "unchanged",
+      // not "cleared".
+      value: f.credential ? '' : (settings[f.key] ?? ''),
+      oninput: e => { settings[f.key] = e.target.value; },
+    }),
+    f.credential
+      ? el('div', { class: 'meta' }, 'Write-only. Leave blank to keep what is stored.')
+      : null)));
+
+  $('#connAuth').hidden = kind !== 'yahoo';
+
+  $('#btnConnAuthUrl').onclick = async () => {
+    try {
+      const { url } = await api('/api/yahoo/authorize-url',
+        { method: 'POST', body: { settings } });
+      $('#connAuthUrl').href = url;
+      $('#connAuthUrl').textContent = url;
+      $('#connAuthBox').hidden = false;
+    } catch (err) { toast(err.message, true); }
+  };
+
+  $('#btnConnExchange').onclick = async () => {
+    const code = ($('#connCode').value || '').trim();
+    if (!code) { toast('Paste the code from the address bar first.', true); return; }
+    try {
+      await api('/api/yahoo/exchange', { method: 'POST', body: { settings, code } });
+    } catch (err) { toast(err.message, true); return; }
+    toast('Connected to Yahoo.');
+    // Persist the non-secret settings (league id, redirect uri) so the next
+    // sync uses the same values the token was minted against.
+    try {
+      await api(`/api/league/${league.id}`, { method: 'PUT', body: { league } });
+    } catch (err) { toast(err.message, true); }
+    renderSyncPanel(league.id);
+  };
+
+  api(`/api/league/${league.id}/platform/status`)
+    .then(s => { $('#connState').textContent = s.detail || (s.ready ? 'Connected' : ''); })
+    .catch(() => {});
+}
+
 async function renderSyncPanel(leagueId) {
   const box = $('#syncButtons');
   if (!box) return;
@@ -1089,6 +1154,7 @@ async function viewSettings() {
   bind('#sLeagueKey', league.platform.settings.league_id,
        v => { league.platform.settings.league_id = v; });
 
+  renderConnectionPanel(league);
   renderSyncPanel(league.id);
 
   $('#sPlatform').replaceChildren(...State.boot.platforms.map(p =>

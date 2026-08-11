@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from ..config import CREDENTIAL_KEYS
 from .base import (
     CAPABILITIES,
     CAPABILITY_LABELS,
@@ -48,7 +49,14 @@ def describe_all() -> list[dict[str, Any]]:
             "description": cls.description,
             "requires_auth": cls.requires_auth,
             "fields": [
-                {"key": key, "label": label, "help": help_text}
+                {
+                    "key": key,
+                    "label": label,
+                    "help": help_text,
+                    # Credentials are stored separately from the league config
+                    # and never sent back, so the UI shows them write-only.
+                    "credential": key in CREDENTIAL_KEYS,
+                }
                 for key, label, help_text in cls.setup_fields
             ],
             "capabilities": sorted(cls().capabilities()),

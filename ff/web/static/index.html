@@ -260,6 +260,28 @@
     </div>
 
     <div class="panel">
+      <h3>Platform connection <span id="connState" class="pill"></span></h3>
+      <p class="hint">Credentials are stored in the secret store, never in your
+        league file — league files are meant to be committed and shared.</p>
+      <div id="connFields" class="fields"></div>
+      <div id="connAuth" class="yahoo-auth" hidden>
+        <p class="hint">Approve on Yahoo's own site. Your password never comes
+          here. Yahoo then sends your browser to your Redirect URI with
+          <code>?code=…</code> on the end — the page will fail to load because
+          nothing is listening there, which is expected. Copy the code out of
+          the address bar and paste it below.</p>
+        <button id="btnConnAuthUrl" class="btn ghost" type="button">Get authorization link</button>
+        <div id="connAuthBox" hidden>
+          <a id="connAuthUrl" target="_blank" rel="noreferrer" class="authlink"></a>
+          <label>Paste the code from the address bar
+            <input id="connCode" type="text" placeholder="code=… (everything after the =)">
+          </label>
+          <button id="btnConnExchange" class="btn primary" type="button">Connect</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
       <h3>Draft schedule <span id="sCountdown" class="pill"></span></h3>
       <p class="hint">Store the date with its timezone so the countdown is never
         ambiguous. The board uses this to tell you when to be ready.</p>
