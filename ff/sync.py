@@ -219,14 +219,16 @@ def sync_league(cfg: dict[str, Any]) -> dict[str, Any]:
         )
 
     before = len(existing)
+    previous_teams = list(cfg.get("teams") or [])
     cfg["teams"] = merged
     cfg["team_count"] = len(merged)
+    carried = _carry_team_references(cfg, previous_teams, merged)
     if remote.get("name"):
         cfg["name"] = remote["name"]
     if remote.get("season"):
         cfg["season"] = remote["season"]
 
-    result: dict[str, Any] = {"teams": len(merged), "replaced": before}
+    result: dict[str, Any] = {"teams": len(merged), "replaced": before, **carried}
     if before and len(merged) < before:
         # Team ids key rosters, scores and the transaction log, so losing one
         # orphans its history. That is worth saying out loud rather than
@@ -240,6 +242,67 @@ def sync_league(cfg: dict[str, Any]) -> dict[str, Any]:
             f"league ID before syncing anything else."
         )
     return result
+
+
+def _carry_team_references(
+    cfg: dict[str, Any],
+    before: Sequence[Mapping[str, Any]],
+    after: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Keep the settings that point *at* teams pointing somewhere real.
+
+    Team ids are derived from team names, so a manager renaming their team on
+    the platform silently renames its id here — and the draft order and "my
+    team" then reference ids that no longer exist. That fails validation, so
+    the whole sync is rejected with an error about the draft order, which is
+    a baffling thing to be told when you asked to import teams.
+
+    Old ids are matched to new ones by name where possible. Anything that
+    cannot be carried across is cleared rather than left dangling, and said
+    out loud so it can be set again.
+    """
+    ids_now = [t["id"] for t in after]
+    valid = set(ids_now)
+    moved = {}
+    for old in before:
+        old_id = old.get("id")
+        if not old_id:
+            continue
+        if old_id in valid:
+            moved[old_id] = old_id
+            continue
+        match = next(
+            (t["id"] for t in after
+             if slugify(t.get("name", "")) == slugify(old.get("name", ""))),
+            None,
+        )
+        if match:
+            moved[old_id] = match
+
+    notes: dict[str, Any] = {}
+
+    order = (cfg.get("draft") or {}).get("order") or []
+    if order:
+        carried = [moved.get(team_id) for team_id in order]
+        if all(carried) and sorted(carried) == sorted(ids_now):
+            cfg["draft"]["order"] = carried
+            if carried != order:
+                notes["draft_order"] = "remapped to the imported team ids"
+        else:
+            cfg["draft"]["order"] = []
+            notes["draft_order_cleared"] = True
+            notes["hint_order"] = (
+                "The draft order referenced teams that no longer exist under "
+                "these names, so it was cleared. Set it again under Draft order."
+            )
+
+    mine = cfg.get("my_team_id")
+    if mine and mine not in valid:
+        cfg["my_team_id"] = moved.get(mine) or (ids_now[0] if ids_now else None)
+        if not moved.get(mine):
+            notes["my_team_reset"] = cfg["my_team_id"]
+
+    return notes
 
 
 def sync_rosters(cfg: Mapping[str, Any], pool: Sequence[Player]) -> dict[str, Any]:

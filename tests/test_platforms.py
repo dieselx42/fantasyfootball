@@ -502,6 +502,39 @@ class TestSyncOperations(unittest.TestCase):
         self.assertTrue(result["dropped_teams"])
         self.assertIn("orphaned", result["hint"])
 
+    def test_matching_team_names_keep_the_draft_order(self):
+        """The common case: nobody renamed anything, so a team import must
+        leave the draft order exactly as it was."""
+        cfg = dict(self.cfg)
+        cfg["teams"] = [
+            {"id": "diesel", "name": "DIESEL", "manager": ""},
+            {"id": "the-killer-ps", "name": "The Killer Ps", "manager": ""},
+        ]
+        cfg["draft"] = {**cfg["draft"], "order": ["the-killer-ps", "diesel"]}
+        sync.sync_league(cfg)
+        self.assertEqual(cfg["draft"]["order"], ["the-killer-ps", "diesel"])
+        self.assertEqual(C.validate(cfg), [])
+
+    def test_a_stale_draft_order_is_cleared_rather_than_left_dangling(self):
+        """Team ids come from team names, so a rename on the platform orphans
+        the draft order — which fails validation and rejects the whole import
+        with an error about the draft order, of all things."""
+        cfg = dict(self.cfg)
+        cfg["teams"] = list(self.cfg["teams"]) + [C.new_team("Gone Team")]
+        cfg["team_count"] = 3
+        cfg["draft"] = {**cfg["draft"],
+                        "order": ["diesel", "killers", "gone-team"]}
+        result = sync.sync_league(cfg)
+        self.assertTrue(result["draft_order_cleared"])
+        self.assertEqual(cfg["draft"]["order"], [])
+        self.assertEqual(C.validate(cfg), [])
+
+    def test_my_team_survives_or_is_reset_to_something_real(self):
+        cfg = dict(self.cfg)
+        cfg["my_team_id"] = "a-team-that-is-gone"
+        sync.sync_league(cfg)
+        self.assertIn(cfg["my_team_id"], [t["id"] for t in cfg["teams"]])
+
     def test_rules_are_proposed_not_applied(self):
         before = dict(self.cfg["scoring"])
         result = sync.sync_rules(self.cfg)

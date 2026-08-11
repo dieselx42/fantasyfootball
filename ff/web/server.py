@@ -201,6 +201,13 @@ def _sync(api: Api, cfg: dict[str, Any], operation: str) -> Any:
         raise ApiError(str(exc), 501) from exc
     except PlatformError as exc:
         raise ApiError(str(exc), 502) from exc
+    except cfgmod.ConfigError as exc:
+        # Imported data that will not validate. Nothing was written, because
+        # save() validates before it persists — say so, rather than letting a
+        # bare 500 imply the league is now half-updated.
+        raise ApiError(
+            f"The imported data did not validate, so nothing was changed: {exc}"
+        ) from exc
 
     raise ApiError(f"Nothing syncs '{operation}'.", 404)
 
