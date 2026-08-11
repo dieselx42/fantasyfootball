@@ -8,14 +8,24 @@ for you is click "Allow" in a browser.
 Setup, once:
 
   1. Create an app at https://developer.yahoo.com/apps/
-     - Application Type: Installed Application
-     - Redirect URI: ``oob``
-     - API Permissions: Fantasy Sports (Read, or Read/Write to submit trades)
-  2. Paste the Client ID and Client Secret into the setup wizard.
+     - OAuth Client Type: **Confidential Client** (this app holds a secret)
+     - Redirect URI: ``https://localhost:8000`` — nothing needs to listen
+       there, see :data:`DEFAULT_REDIRECT_URI`
+     - API Permissions: Fantasy Sports read, if the form offers it. Newer
+       app forms do not list Fantasy Sports separately.
+  2. Paste the Client ID and Client Secret into the setup wizard, along with
+     the same Redirect URI you registered.
   3. Open the authorize URL it gives you, approve, and paste the code back.
 
-Tokens go to the active storage backend: a gitignored file under
-``secrets/`` locally, or a database row when hosted.
+Yahoo's app form has changed more than once, and the fields it offers differ
+by account. Whatever it asks for, the rule that matters is that the Redirect
+URI here and the one registered there are byte-identical; a mismatch fails the
+token exchange with an error that does not say so.
+
+Credentials go to the storage backend's secret store, never into a league
+config — league configs are meant to be committed and shared. Tokens go to the
+same place: a gitignored file under ``secrets/`` locally, a private row when
+hosted.
 """
 
 from __future__ import annotations
@@ -35,8 +45,20 @@ from .base import PlatformAdapter, PlatformError
 AUTH_URL = "https://api.login.yahoo.com/oauth2/request_auth"
 TOKEN_URL = "https://api.login.yahoo.com/oauth2/get_token"
 API_BASE = "https://fantasysports.yahooapis.com/fantasy/v2"
-REDIRECT_URI = "oob"
 TIMEOUT = 25
+
+#: Where Yahoo sends you after you approve. This must match the Redirect URI
+#: registered on the Yahoo app *exactly*, or the token exchange fails with an
+#: unhelpful error, so it is configurable rather than assumed.
+#:
+#: Yahoo's app form used to offer an "Installed Application" type whose
+#: redirect was the literal string ``oob`` — Yahoo displayed the code on screen
+#: for you to copy. Newer app forms ask for a real URI instead. A localhost URL
+#: works without running anything there: Yahoo redirects the browser to
+#: ``https://localhost:8000/?code=…``, the page fails to load because nothing
+#: is listening, and the code is sitting in the address bar to copy. Same
+#: copy-paste flow, on a form that will accept it.
+DEFAULT_REDIRECT_URI = "https://localhost:8000"
 
 #: Yahoo's game key for NFL changes each season; ``nfl`` resolves to current.
 GAME_KEY = "nfl"
@@ -49,9 +71,16 @@ class YahooAdapter(PlatformAdapter):
     requires_auth = True
     setup_fields = (
         ("client_id", "Yahoo Client ID", "From https://developer.yahoo.com/apps/"),
-        ("client_secret", "Yahoo Client Secret", "Kept locally in secrets/, never committed."),
+        ("client_secret", "Yahoo Client Secret", "Kept in the secret store, never in a league file."),
         ("league_id", "League ID", "The number in your league URL, e.g. 123456."),
+        ("redirect_uri", "Redirect URI",
+         "Must match your Yahoo app exactly. Default https://localhost:8000; "
+         "older apps used the literal word oob."),
     )
+
+    @property
+    def redirect_uri(self) -> str:
+        return str(self.settings.get("redirect_uri") or DEFAULT_REDIRECT_URI)
 
     def capabilities(self) -> set[str]:
         return {
@@ -68,7 +97,7 @@ class YahooAdapter(PlatformAdapter):
         query = urllib.parse.urlencode(
             {
                 "client_id": client_id,
-                "redirect_uri": REDIRECT_URI,
+                "redirect_uri": self.redirect_uri,
                 "response_type": "code",
                 "language": "en-us",
             }
@@ -80,7 +109,7 @@ class YahooAdapter(PlatformAdapter):
         token = self._token_request(
             {
                 "grant_type": "authorization_code",
-                "redirect_uri": REDIRECT_URI,
+                "redirect_uri": self.redirect_uri,
                 "code": code.strip(),
             }
         )
@@ -137,7 +166,7 @@ class YahooAdapter(PlatformAdapter):
             token = self._token_request(
                 {
                     "grant_type": "refresh_token",
-                    "redirect_uri": REDIRECT_URI,
+                    "redirect_uri": self.redirect_uri,
                     "refresh_token": token["refresh_token"],
                 }
             )
