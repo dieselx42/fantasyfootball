@@ -60,6 +60,16 @@ TIMEOUT = 25
 #: copy-paste flow, on a form that will accept it.
 DEFAULT_REDIRECT_URI = "https://localhost:8000"
 
+#: What the token is allowed to do. Yahoo's newer app forms no longer offer a
+#: Fantasy Sports permission checkbox, so an app that asks for nothing gets a
+#: token with no fantasy access — which authorises cleanly and then answers
+#: 401 to every fantasy endpoint. Asking for the scope explicitly is what
+#: makes the token usable.
+#:
+#:   ``fspt-r``  read
+#:   ``fspt-w``  read and write (needed only to submit moves back to Yahoo)
+DEFAULT_SCOPE = "fspt-r"
+
 #: Yahoo's game key for NFL changes each season; ``nfl`` resolves to current.
 GAME_KEY = "nfl"
 
@@ -97,11 +107,17 @@ class YahooAdapter(PlatformAdapter):
         ("redirect_uri", "Redirect URI",
          "Must match your Yahoo app exactly. Default https://localhost:8000; "
          "older apps used the literal word oob."),
+        ("scope", "Scope",
+         "fspt-r for read. Use fspt-w only if you want to submit moves to Yahoo."),
     )
 
     @property
     def redirect_uri(self) -> str:
         return str(self.settings.get("redirect_uri") or DEFAULT_REDIRECT_URI)
+
+    @property
+    def scope(self) -> str:
+        return str(self.settings.get("scope") or DEFAULT_SCOPE)
 
     def capabilities(self) -> set[str]:
         return {
@@ -120,6 +136,7 @@ class YahooAdapter(PlatformAdapter):
                 "client_id": client_id,
                 "redirect_uri": self.redirect_uri,
                 "response_type": "code",
+                "scope": self.scope,
                 "language": "en-us",
             }
         )
@@ -206,6 +223,20 @@ class YahooAdapter(PlatformAdapter):
             with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
                 return json.loads(response.read().decode())
         except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                # The token is live — status() proved that by refreshing it —
+                # so this is about what the token is *allowed* to do, not
+                # whether it exists. A token minted without a fantasy scope
+                # authorises perfectly and then 401s on every fantasy call.
+                raise PlatformError(
+                    f"Yahoo rejected the request as unauthorised (401 for {path}). "
+                    f"The connection is live, so this is a permissions problem "
+                    f"rather than an expired token: the token was almost "
+                    f"certainly issued without Fantasy Sports access. "
+                    f"Re-authorise — the authorize link now asks for "
+                    f"'{self.scope}' — and if it still fails, check that your "
+                    f"Yahoo app grants Fantasy Sports read."
+                ) from exc
             raise PlatformError(f"Yahoo returned HTTP {exc.code} for {path}") from exc
         except (urllib.error.URLError, OSError) as exc:
             raise PlatformError(f"Could not reach Yahoo: {exc}") from exc

@@ -116,6 +116,20 @@ class TestAuthorizationCode(unittest.TestCase):
         self.assertEqual(query["redirect_uri"], "oob")
         self.assertEqual(adapter.redirect_uri, "oob")
 
+    def test_the_authorize_url_asks_for_fantasy_access(self):
+        """Without a scope, Yahoo mints a token that authorises cleanly and
+        then 401s on every fantasy endpoint — the failure arrives one step
+        after the mistake, which is why it is worth pinning down here."""
+        import urllib.parse as parse
+
+        adapter = get_adapter("yahoo", {"client_id": "ABC"})
+        query = dict(parse.parse_qsl(parse.urlparse(adapter.authorize_url()).query))
+        self.assertEqual(query["scope"], "fspt-r")
+
+    def test_scope_is_configurable_for_write_access(self):
+        adapter = get_adapter("yahoo", {"client_id": "ABC", "scope": "fspt-w"})
+        self.assertIn("scope=fspt-w", adapter.authorize_url())
+
     def test_the_default_redirect_uri_is_one_yahoo_will_accept(self):
         adapter = get_adapter("yahoo", {"client_id": "ABC"})
         self.assertEqual(adapter.redirect_uri, Y.DEFAULT_REDIRECT_URI)
