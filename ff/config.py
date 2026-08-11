@@ -498,11 +498,53 @@ def load_file(path: Path) -> dict[str, Any]:
     return migrate(cfg)
 
 
+#: Platform settings that are credentials, not configuration. These never go
+#: into a league file: league configs are meant to be committed, shared and
+#: handed to someone in another league, and a file that does all three is the
+#: worst possible place for an API secret.
+CREDENTIAL_KEYS = ("client_id", "client_secret", "espn_s2", "swid", "password")
+
+
+def split_credentials(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Move platform credentials out of a config, returning them.
+
+    Mutates ``cfg``. Callers persist the returned secrets through the storage
+    backend's secret store, which is gitignored locally and a private row when
+    hosted.
+    """
+    platform = cfg.get("platform") or {}
+    settings = platform.get("settings") or {}
+    found = {}
+    for key in CREDENTIAL_KEYS:
+        if settings.get(key):
+            found[key] = settings.pop(key)
+    return found
+
+
+def platform_credentials(kind: str) -> dict[str, Any]:
+    """Stored credentials for a platform, or an empty dict."""
+    from .storage import get_backend
+
+    return get_backend().load_token(f"{kind}.app") or {}
+
+
 def save(cfg: dict[str, Any]) -> str:
     from .storage import get_backend
 
     ensure_valid(cfg)
-    get_backend().save_league(cfg)
+    backend = get_backend()
+
+    # Strip credentials before the config is written anywhere. Merged with
+    # whatever is already stored, so saving a league after editing an
+    # unrelated setting does not wipe the credentials it no longer carries.
+    kind = (cfg.get("platform") or {}).get("kind") or "manual"
+    secrets = split_credentials(cfg)
+    if secrets:
+        merged = platform_credentials(kind)
+        merged.update(secrets)
+        backend.save_token(f"{kind}.app", merged)
+
+    backend.save_league(cfg)
     return cfg["id"]
 
 

@@ -41,8 +41,10 @@ class EspnAdapter(PlatformAdapter):
         return {"league", "rosters", "players"}
 
     def _cookies(self) -> str:
-        s2 = self.settings.get("espn_s2")
-        swid = self.settings.get("swid")
+        # Session cookies are credentials, so they come from the secret store
+        # rather than the league config. See ff.config.CREDENTIAL_KEYS.
+        s2 = self.credential("espn_s2")
+        swid = self.credential("swid")
         parts = []
         if s2:
             parts.append(f"espn_s2={s2}")

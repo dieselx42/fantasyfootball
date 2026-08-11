@@ -278,6 +278,60 @@ def player(name, pos):
     return Player(player_id=make_player_id(name, pos, ""), name=name, pos=pos)
 
 
+class TestCredentialsStayOutOfConfigs(unittest.TestCase):
+    """League configs are meant to be committed and shared with league-mates.
+    An API secret in one is a secret in someone's git history."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        storage.set_backend(FileBackend(
+            leagues_dir=self.root / "leagues", projections_dir=self.root / "proj",
+            db_path=self.root / "ff.db", secrets_dir=self.root / "secrets"))
+        self.addCleanup(storage.reset)
+
+        cfg = C.new_config("Secrets", "yahoo", 2, 1.0)
+        cfg["teams"] = [C.new_team("A"), C.new_team("B")]
+        cfg["platform"]["settings"] = {
+            "league_id": "184206",
+            "client_id": "PUBLIC-ID",
+            "client_secret": "SUPER-SECRET",
+        }
+        C.save(cfg)
+        self.cfg = cfg
+
+    def league_file(self):
+        return (self.root / "leagues" / "secrets.json").read_text()
+
+    def test_the_secret_never_reaches_the_league_file(self):
+        self.assertNotIn("SUPER-SECRET", self.league_file())
+        self.assertNotIn("PUBLIC-ID", self.league_file())
+
+    def test_real_configuration_still_does(self):
+        self.assertIn("184206", self.league_file())
+
+    def test_the_adapter_still_finds_them(self):
+        adapter = get_adapter("yahoo", {})
+        self.assertEqual(adapter.credential("client_secret"), "SUPER-SECRET")
+        self.assertIn("PUBLIC-ID", adapter.authorize_url())
+
+    def test_a_later_save_does_not_wipe_them(self):
+        """Saving a league whose config no longer carries credentials — which
+        is every save after the first — must not clear the stored ones."""
+        loaded = C.load("secrets")
+        loaded["name"] = "Renamed"
+        C.save(loaded)
+        self.assertEqual(get_adapter("yahoo", {}).credential("client_secret"),
+                         "SUPER-SECRET")
+
+    def test_values_passed_in_directly_win(self):
+        """The setup wizard authorises with typed-in credentials before the
+        league has been saved at all."""
+        adapter = get_adapter("yahoo", {"client_id": "TYPED"})
+        self.assertEqual(adapter.credential("client_id"), "TYPED")
+
+
 class TestJoins(unittest.TestCase):
     def setUp(self):
         self.cfg = C.new_config("Join Test", "yahoo", 2, 1.0)

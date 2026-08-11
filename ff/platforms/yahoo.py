@@ -62,7 +62,7 @@ class YahooAdapter(PlatformAdapter):
     # -- auth --------------------------------------------------------------
 
     def authorize_url(self) -> str:
-        client_id = self.settings.get("client_id")
+        client_id = self.credential("client_id")
         if not client_id:
             raise PlatformError("Set your Yahoo Client ID first.")
         query = urllib.parse.urlencode(
@@ -88,8 +88,8 @@ class YahooAdapter(PlatformAdapter):
         return {"ok": True, "expires_in": token.get("expires_in")}
 
     def _token_request(self, payload: dict[str, str]) -> dict[str, Any]:
-        client_id = self.settings.get("client_id")
-        client_secret = self.settings.get("client_secret")
+        client_id = self.credential("client_id")
+        client_secret = self.credential("client_secret")
         if not client_id or not client_secret:
             raise PlatformError("Yahoo Client ID and Secret are both required.")
 
@@ -161,7 +161,7 @@ class YahooAdapter(PlatformAdapter):
             raise PlatformError(f"Could not reach Yahoo: {exc}") from exc
 
     def status(self) -> dict[str, Any]:
-        if not self.settings.get("client_id"):
+        if not self.credential("client_id"):
             return {"kind": self.kind, "ready": False,
                     "detail": "Add your Yahoo Client ID and Secret."}
         if not self._load_token():

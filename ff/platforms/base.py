@@ -79,6 +79,20 @@ class PlatformAdapter:
     def __init__(self, settings: Mapping[str, Any] | None = None):
         self.settings = dict(settings or {})
 
+    def credential(self, key: str) -> str:
+        """A credential for this platform.
+
+        Credentials live in the secret store rather than the league config,
+        because league configs are meant to be committed and shared. Values
+        passed in directly still win, so the setup wizard can authorise with
+        credentials the user has typed but not yet saved.
+        """
+        if self.settings.get(key):
+            return str(self.settings[key])
+        from ..config import platform_credentials
+
+        return str(platform_credentials(self.kind).get(key) or "")
+
     # -- capability probes -------------------------------------------------
 
     def status(self) -> dict[str, Any]:
