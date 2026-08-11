@@ -34,6 +34,12 @@ class EspnAdapter(PlatformAdapter):
         ("swid", "SWID cookie", "Private leagues only, including the braces."),
     )
 
+    def capabilities(self) -> set[str]:
+        # Public leagues read fine; private ones need browser cookies. The
+        # in-season endpoints are not wired up yet, and saying so is better
+        # than offering a button that fails.
+        return {"league", "rosters", "players"}
+
     def _cookies(self) -> str:
         s2 = self.settings.get("espn_s2")
         swid = self.settings.get("swid")

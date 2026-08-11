@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from .base import PlatformAdapter, PlatformError
+from .base import (
+    CAPABILITIES,
+    CAPABILITY_LABELS,
+    PlatformAdapter,
+    PlatformError,
+    PlatformUnsupported,
+)
 from .espn import EspnAdapter
 from .manual import ManualAdapter
 from .sleeper import SleeperAdapter
@@ -45,6 +51,7 @@ def describe_all() -> list[dict[str, Any]]:
                 {"key": key, "label": label, "help": help_text}
                 for key, label, help_text in cls.setup_fields
             ],
+            "capabilities": sorted(cls().capabilities()),
         }
         for cls in ADAPTERS.values()
     ]
@@ -52,8 +59,11 @@ def describe_all() -> list[dict[str, Any]]:
 
 __all__ = [
     "ADAPTERS",
+    "CAPABILITIES",
+    "CAPABILITY_LABELS",
     "PlatformAdapter",
     "PlatformError",
+    "PlatformUnsupported",
     "adapter_for",
     "describe_all",
     "get_adapter",

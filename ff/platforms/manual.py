@@ -20,6 +20,11 @@ class ManualAdapter(PlatformAdapter):
     requires_auth = False
     setup_fields = ()
 
+    def capabilities(self) -> set[str]:
+        # Nothing is synced because nothing is connected. Every one of these
+        # is still available in the app — you enter it rather than fetch it.
+        return {"players"}
+
     def status(self) -> dict[str, Any]:
         return {"kind": self.kind, "ready": True, "detail": "No connection needed."}
 
