@@ -84,6 +84,44 @@ class TestContract(unittest.TestCase):
 # Yahoo
 # --------------------------------------------------------------------------
 
+class TestAuthorizationCode(unittest.TestCase):
+    """Whatever gets pasted out of the address bar has to work.
+
+    Yahoo rejects a malformed code with an opaque invalid_grant, at the last
+    step of a setup nobody does twice, so guessing wrong is expensive.
+    """
+
+    def test_every_way_a_code_gets_pasted(self):
+        for raw in (
+            "abc123d",
+            "code=abc123d",
+            "?code=abc123d",
+            "https://localhost:8000/?code=abc123d",
+            "https://localhost:8000/?code=abc123d&state=xyz",
+            "  code=abc123d  ",
+        ):
+            self.assertEqual(Y.extract_code(raw), "abc123d", raw)
+
+    def test_nothing_pasted_stays_nothing(self):
+        self.assertEqual(Y.extract_code(""), "")
+        self.assertEqual(Y.extract_code("   "), "")
+
+    def test_the_redirect_uri_is_configurable_and_matches_the_authorize_url(self):
+        """The registered URI and the one we send must agree exactly, so the
+        value used to build the link is the value used to redeem the code."""
+        import urllib.parse as parse
+
+        adapter = get_adapter("yahoo", {"client_id": "ABC", "redirect_uri": "oob"})
+        query = dict(parse.parse_qsl(parse.urlparse(adapter.authorize_url()).query))
+        self.assertEqual(query["redirect_uri"], "oob")
+        self.assertEqual(adapter.redirect_uri, "oob")
+
+    def test_the_default_redirect_uri_is_one_yahoo_will_accept(self):
+        adapter = get_adapter("yahoo", {"client_id": "ABC"})
+        self.assertEqual(adapter.redirect_uri, Y.DEFAULT_REDIRECT_URI)
+        self.assertTrue(adapter.redirect_uri.startswith("https://"))
+
+
 class TestYahooShape(unittest.TestCase):
     """Yahoo splits one object's fields across a list of one-key dicts."""
 

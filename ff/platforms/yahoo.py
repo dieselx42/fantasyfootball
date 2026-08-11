@@ -64,6 +64,27 @@ DEFAULT_REDIRECT_URI = "https://localhost:8000"
 GAME_KEY = "nfl"
 
 
+def extract_code(raw: str) -> str:
+    """The authorization code, however it was pasted.
+
+    The code arrives in a browser address bar, so what lands in the box is
+    whatever was convenient to select: the whole redirect URL, the query
+    string, ``code=abc123``, or the bare value. All of them mean the same
+    thing, and Yahoo's rejection of the wrong one is an opaque
+    ``invalid_grant`` — so they are all accepted here rather than left as a
+    trap at the last step of setup.
+    """
+    text = (raw or "").strip().strip("?&")
+    if not text:
+        return ""
+    if "code=" in text:
+        text = text.split("code=", 1)[1]
+    # Drop anything Yahoo appended after the code.
+    for separator in ("&", "#", " "):
+        text = text.split(separator, 1)[0]
+    return urllib.parse.unquote(text).strip()
+
+
 class YahooAdapter(PlatformAdapter):
     kind = "yahoo"
     label = "Yahoo Fantasy"
@@ -110,7 +131,7 @@ class YahooAdapter(PlatformAdapter):
             {
                 "grant_type": "authorization_code",
                 "redirect_uri": self.redirect_uri,
-                "code": code.strip(),
+                "code": extract_code(code),
             }
         )
         self._save_token(token)
