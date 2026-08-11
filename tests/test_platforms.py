@@ -384,6 +384,62 @@ class TestCredentialsStayOutOfConfigs(unittest.TestCase):
         self.assertEqual(adapter.credential("client_id"), "TYPED")
 
 
+class TestProjectionImport(unittest.TestCase):
+    """Synced projections go through the CSV importer, not around it."""
+
+    def rows(self):
+        a = Player(player_id="a", name="Josh Allen", pos="QB", team="BUF",
+                   stats={"pass_yd": 4100.0, "pass_td": 34.0}, adp=28.2)
+        b = Player(player_id="b", name="Baltimore", pos="DST", team="BAL",
+                   stats={"dst_sack": 34.0, "dst_int": 8.0})
+        return [a, b]
+
+    def test_the_csv_reparses_into_the_same_players(self):
+        from ff.players import parse_projection_csv
+
+        parsed = {p.name: p for p in
+                  parse_projection_csv(sync.projections_to_csv(self.rows()), "synced")}
+        self.assertEqual(parsed["Josh Allen"].stats["pass_td"], 34.0)
+        self.assertEqual(parsed["Josh Allen"].adp, 28.2)
+        self.assertEqual(parsed["Baltimore"].pos, "DST")
+        self.assertEqual(parsed["Baltimore"].stats["dst_sack"], 34.0)
+
+    def test_stat_lines_survive_so_they_can_be_rescored(self):
+        """The point of importing stat lines rather than points: the same
+        player is worth different amounts under different rules."""
+        from ff.players import parse_projection_csv
+        from ff.scoring import score_stats
+
+        parsed = parse_projection_csv(sync.projections_to_csv(self.rows()), "s")
+        allen = next(p for p in parsed if p.name == "Josh Allen")
+        six = score_stats(allen.stats, {"scoring": {"pass_yd": 0.02, "pass_td": 6}})
+        four = score_stats(allen.stats, {"scoring": {"pass_yd": 0.02, "pass_td": 4}})
+        self.assertEqual(round(six - four, 2), 68.0)
+
+    def test_a_weekly_set_carries_its_week(self):
+        from ff.players import parse_projection_csv
+
+        weekly = self.rows()
+        for p in weekly:
+            p.week = 3
+        parsed = parse_projection_csv(sync.projections_to_csv(weekly), "s")
+        self.assertTrue(all(p.week == 3 for p in parsed))
+
+    def test_a_season_set_has_no_week(self):
+        from ff.players import parse_projection_csv
+
+        parsed = parse_projection_csv(sync.projections_to_csv(self.rows()), "s")
+        self.assertTrue(all(p.week is None for p in parsed))
+
+    @unittest.skipUnless(LIVE, "set FF_TEST_LIVE_SLEEPER=1 to hit the real API")
+    def test_live_season_projections_cover_every_position(self):
+        players = S.SleeperAdapter({}).fetch_projections(2026)
+        self.assertGreater(len(players), 400)
+        self.assertEqual({p.pos for p in players},
+                         {"QB", "RB", "WR", "TE", "K", "DST"})
+        self.assertTrue(all(p.stats for p in players))
+
+
 class TestJoins(unittest.TestCase):
     def setUp(self):
         self.cfg = C.new_config("Join Test", "yahoo", 2, 1.0)

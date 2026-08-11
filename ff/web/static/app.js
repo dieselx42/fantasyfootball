@@ -1060,6 +1060,10 @@ async function runSync(leagueId, operation, label, button) {
     : operation === 'rosters' ? `${data.teams_written} rosters written`
     : operation === 'draft' ? `${data.picks} picks imported`
     : operation === 'league' ? `${data.teams} teams imported`
+    : operation === 'projections'
+        ? `${data.imported} ${data.scope} projections imported into ${data.file}`
+          + ` (${Object.entries(data.by_position || {})
+                 .map(([pos, n]) => `${n} ${pos}`).join(', ')})`
     : 'Done';
 
   out.replaceChildren(

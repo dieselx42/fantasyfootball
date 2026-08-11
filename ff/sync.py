@@ -483,6 +483,73 @@ def _iso(timestamp: Any) -> str:
         return ""
 
 
+#: Columns written ahead of the stat columns. The importer matches header
+#: names loosely, and our own canonical stat keys are among the names it
+#: recognises, so a synced set parses through exactly the same code as a
+#: hand-dropped CSV — no second import path to keep in step.
+PROJECTION_COLUMNS = ("Player", "Team", "Pos", "Week", "ADP", "Status", "Opp")
+
+
+def projections_to_csv(players: Sequence[Player]) -> str:
+    """Serialise fetched projections as a CSV the normal importer can read.
+
+    Going through CSV rather than straight into the pool is deliberate: a
+    synced set then appears in the Projections list like any other, can be
+    deleted, and merges with a FantasyPros export under the same rules.
+    """
+    import csv
+    import io
+
+    stat_keys = sorted({key for p in players for key in p.stats})
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([*PROJECTION_COLUMNS, *stat_keys])
+    for player in players:
+        writer.writerow([
+            player.name,
+            player.team,
+            player.pos,
+            player.week if player.week is not None else "",
+            player.adp if player.adp else "",
+            player.status,
+            player.opponent,
+            *[player.stats.get(key, "") for key in stat_keys],
+        ])
+    return buffer.getvalue()
+
+
+def sync_projections(
+    cfg: Mapping[str, Any], week: int | None = None, season: int | None = None
+) -> dict[str, Any]:
+    """Pull projections from the platform into the projection store."""
+    from .storage import get_backend
+
+    adapter = adapter_for(cfg)
+    year = int(season or cfg.get("season") or 0)
+    if not year:
+        raise PlatformError("Set the league season first.")
+
+    players = adapter.fetch_projections(year, week)
+    if not players:
+        return {"imported": 0, "detail": "The platform returned no projections."}
+
+    name = f"{adapter.kind}-{year}" + (f"-wk{week}" if week is not None else "-season")
+    get_backend().save_projection_set(f"{name}.csv", projections_to_csv(players))
+
+    counts: dict[str, int] = {}
+    for player in players:
+        counts[player.pos] = counts.get(player.pos, 0) + 1
+    return {
+        "imported": len(players),
+        "file": f"{name}.csv",
+        "week": week,
+        "season": year,
+        "by_position": counts,
+        "with_adp": sum(1 for p in players if p.adp),
+        "scope": "week" if week is not None else "season",
+    }
+
+
 def sync_draft(cfg: Mapping[str, Any], pool: Sequence[Player]) -> dict[str, Any]:
     """Import a completed draft as this app's pick list."""
     from .draft import Pick

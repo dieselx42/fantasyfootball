@@ -48,6 +48,7 @@ CAPABILITIES = (
     "league",         # name, season, teams, managers
     "rules",          # scoring, roster slots, waivers, playoffs
     "players",        # the player universe
+    "projections",    # season or weekly projections, as stat lines
     "rosters",        # who owns whom right now
     "scoreboard",     # one week's fixtures and points
     "transactions",   # adds, drops, trades
@@ -58,6 +59,7 @@ CAPABILITY_LABELS = {
     "league": "Teams and managers",
     "rules": "Scoring and roster rules",
     "players": "Player universe",
+    "projections": "Projections",
     "rosters": "Current rosters",
     "scoreboard": "Weekly scores",
     "transactions": "League transactions",
@@ -122,9 +124,14 @@ class PlatformAdapter:
         """The player universe: names, positions, teams. No projections."""
         raise self._unsupported("players")
 
-    def fetch_projections(self, season: int) -> list[Player]:
-        """Season projections, if the platform exposes them."""
-        raise self._unsupported("players")
+    def fetch_projections(self, season: int, week: int | None = None) -> list[Player]:
+        """Projections as *stat lines*, season-long or for one week.
+
+        Stat lines rather than points, always. A projected-points column was
+        computed under somebody else's scoring rules, and re-scoring it under
+        this league's is the whole point of the app.
+        """
+        raise self._unsupported("projections")
 
     def fetch_adp(self) -> dict[str, float]:
         """Map of ``player_id`` -> average draft position."""

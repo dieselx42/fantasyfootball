@@ -14,11 +14,29 @@ import urllib.error
 import urllib.request
 from typing import Any, Mapping
 
-from ..players import Player, make_player_id, normalize_pos, normalize_team
+from ..players import (
+    Player,
+    make_player_id,
+    normalize_pos,
+    normalize_status,
+    normalize_team,
+)
 from .base import PlatformAdapter, PlatformError
 
+
+def _as_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 API = "https://api.sleeper.app/v1"
-TIMEOUT = 25
+
+#: Projections sit outside the documented /v1 tree, on the bare host. They are
+#: undocumented, so treat this as the convenience it is: when it breaks, the
+#: CSV import path is still there and still the source of record.
+PROJECTIONS_API = "https://api.sleeper.app"
+TIMEOUT = 45
 
 #: Sleeper's scoring keys are already snake_case and close to ours, so this is
 #: mostly a rename. Anything absent here is reported as unmapped rather than
@@ -58,8 +76,8 @@ ROSTER_SLOTS: dict[str, list[str]] = {
 POINTS_ALLOWED = re.compile(r"^pts_allow_(\d+)(?:_(\d+))?(p)?$")
 
 
-def _get(path: str) -> Any:
-    url = f"{API}{path}"
+def _get(path: str, base: str = API) -> Any:
+    url = f"{base}{path}"
     request = urllib.request.Request(url, headers={"User-Agent": "ff-assistant/1.0"})
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
@@ -178,7 +196,73 @@ class SleeperAdapter(PlatformAdapter):
         # No draft-results support here yet: Sleeper exposes it under a
         # separate draft id rather than the league id, so it is a different
         # lookup rather than a missing endpoint.
-        return {"league", "rules", "players", "rosters", "scoreboard", "transactions"}
+        return {"league", "rules", "players", "projections", "rosters",
+                "scoreboard", "transactions"}
+
+    def fetch_projections(self, season: int, week: int | None = None) -> list[Player]:
+        """Projections as stat lines, season-long or for one week.
+
+        Sleeper publishes these openly and without a key, which is the reason
+        this is the default source: every other free option is either a login
+        wall or a scrape. The stat keys are close enough to ours to be a
+        rename, so a projection lands as a stat line and gets re-scored under
+        *your* league's rules rather than arriving as somebody else's points.
+        """
+        path = f"/projections/nfl/{int(season)}"
+        if week is not None:
+            path += f"/{int(week)}"
+        rows = _get(f"{path}?season_type=regular", base=PROJECTIONS_API)
+        if not isinstance(rows, list):
+            raise PlatformError("Unexpected projection payload from Sleeper.")
+
+        out: list[Player] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            stats = row.get("stats") or {}
+            entry = row.get("player") or {}
+            # No projected points at all means Sleeper has not projected this
+            # player; an all-zero row would drag replacement level down.
+            if not stats.get("pts_ppr") and not stats.get("pts_std"):
+                continue
+
+            pos = normalize_pos(entry.get("position") or "")
+            if pos not in ("QB", "RB", "WR", "TE", "K", "DST"):
+                continue
+            team = normalize_team(row.get("team") or entry.get("team") or "")
+            name = team if pos == "DST" else " ".join(
+                part for part in (entry.get("first_name"), entry.get("last_name")) if part
+            ).strip()
+            if not name:
+                continue
+
+            mapped = {
+                SCORING_KEYS[key]: float(value)
+                for key, value in stats.items()
+                if key in SCORING_KEYS and isinstance(value, (int, float))
+            }
+            # A row whose stats map to nothing we score would enter the pool
+            # at zero points and drag that position's replacement level down,
+            # inflating everyone else's value over replacement. Sleeper has a
+            # few — a kicker filed under defensive stats, say — so they are
+            # dropped rather than carried as worthless.
+            if not mapped:
+                continue
+
+            out.append(Player(
+                player_id=make_player_id(name, pos, team),
+                name=name,
+                pos=pos,
+                team=team,
+                stats=mapped,
+                adp=_as_float(stats.get("adp_ppr") or stats.get("adp_half_ppr")
+                              or stats.get("adp_std")),
+                week=int(week) if week is not None else None,
+                status=normalize_status(entry.get("injury_status") or ""),
+                opponent=normalize_team(row.get("opponent") or ""),
+                source=f"sleeper-{season}" + (f"-wk{week}" if week is not None else ""),
+            ))
+        return out
 
     def status(self) -> dict[str, Any]:
         try:

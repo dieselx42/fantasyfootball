@@ -184,6 +184,14 @@ def _sync(api: Api, cfg: dict[str, Any], operation: str) -> Any:
         if operation == "rosters":
             return sync.sync_rosters(cfg, build_pool(cfg))
 
+        if operation == "projections":
+            # No week means season-long totals, which is what the draft board
+            # wants; a week means matchup-aware numbers for the Week tab.
+            raw = api.arg("week")
+            result = sync.sync_projections(cfg, int(raw) if raw else None)
+            invalidate()
+            return result
+
         if operation == "transactions":
             return sync.sync_transactions(cfg, build_pool(cfg))
 
