@@ -171,12 +171,23 @@
     "type": "snake",
     "rounds": 15,
     "seconds_per_pick": 105,
-    "order": [],
+    "order": [
+      "rey-del-norte",
+      "the-killer-ps",
+      "ruly-s-big-tymers",
+      "baker-s-dirty-dozen",
+      "g-o-a-t-6x-champ",
+      "diesel",
+      "eat-meat",
+      "dracarys",
+      "double-taylor-gators",
+      "code-brown"
+    ],
     "auction_budget": 200,
     "scheduled_at": "2026-08-30T17:45:00-04:00",
     "timezone": "EDT",
     "arrive_minutes_early": 10,
-    "location": "Online \u2014 Yahoo (Live Standard Draft)",
+    "location": "Online — Yahoo (Live Standard Draft)",
     "notes": "Arrive 10 minutes early; the draft starts promptly at 5:45pm EDT."
   },
   "valuation": {
@@ -213,53 +224,53 @@
   "teams": [
     {
       "id": "diesel",
-      "name": "\u2620DIESEL\u2620",
-      "manager": ""
+      "name": "☠DIESEL☠",
+      "manager": "PHIL"
     },
     {
       "id": "ruly-s-big-tymers",
       "name": "Ruly's Big Tymers",
-      "manager": ""
+      "manager": "RULY"
     },
     {
       "id": "baker-s-dirty-dozen",
       "name": "Baker's Dirty Dozen",
-      "manager": ""
+      "manager": "GEORGE"
     },
     {
       "id": "double-taylor-gators",
       "name": "Double Taylor Gators",
-      "manager": ""
+      "manager": "STEVE"
     },
     {
       "id": "code-brown",
       "name": "Code Brown",
-      "manager": ""
+      "manager": "TONY"
     },
     {
       "id": "g-o-a-t-6x-champ",
       "name": "G.O.A.T. 6X CHAMP",
-      "manager": ""
+      "manager": "JOEY"
     },
     {
       "id": "dracarys",
       "name": "Dracarys",
-      "manager": ""
+      "manager": "MARK"
     },
     {
       "id": "the-killer-ps",
       "name": "The Killer Ps",
-      "manager": ""
+      "manager": "FERNANDO"
     },
     {
       "id": "rey-del-norte",
       "name": "Rey del Norte",
-      "manager": ""
+      "manager": "JACK"
     },
     {
       "id": "eat-meat",
       "name": "EAT MEAT",
-      "manager": ""
+      "manager": "MARIANO"
     }
   ],
   "my_team_id": "diesel",
