@@ -274,6 +274,21 @@ select.status {
 .filerow button { margin-left: auto; background: none; border: 0; color: var(--dim); cursor: pointer; }
 .filerow button:hover { color: var(--bad); }
 
+/* ---------- platform sync ---------- */
+.sync-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
+.sync-btn { text-align: left; }
+.sync-btn .cap { display: block; font-size: 12px; color: var(--dim); margin-top: 2px; }
+.sync-btn:disabled { opacity: .4; }
+.sync-result { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line);
+               font-size: 13px; }
+.sync-result .ok { color: var(--good); }
+.sync-result .warn { color: var(--warn); }
+.sync-result ul { margin: 6px 0 0; padding-left: 20px; color: var(--dim); }
+.sync-result table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.sync-result td { padding: 4px 8px; border-top: 1px solid var(--line);
+                  vertical-align: top; font-family: ui-monospace, monospace; font-size: 12px; }
+.sync-result td:first-child { color: var(--dim); white-space: nowrap; }
+
 /* ---------- draft countdown ---------- */
 .draft-countdown {
   display: flex; align-items: center; gap: 8px;

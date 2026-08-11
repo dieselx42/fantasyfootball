@@ -298,12 +298,57 @@ then appears in the scoring editor and works everywhere; no other file changes.
 
 ## Platforms
 
-| Platform | Status | Notes |
-| --- | --- | --- |
-| Manual | Works | No API. Every feature is available. |
-| Sleeper | Works | Free public API, no key. Good source for player data even if your league is elsewhere. |
-| Yahoo | Needs your app | OAuth2 only — see below. |
-| ESPN | Partial | Public leagues read fine; private leagues need browser cookies. |
+Connecting a platform is optional — everything works typed in by hand — but it
+turns a lot of weekly data entry into one button.
+
+| | Manual | Sleeper | Yahoo | ESPN |
+| --- | :-: | :-: | :-: | :-: |
+| Teams and managers | — | ✓ | ✓ | ✓ |
+| Scoring and roster rules | — | ✓ | ✓ | — |
+| Player universe | ✓ | ✓ | ✓ | ✓ |
+| Current rosters | — | ✓ | ✓ | ✓ |
+| Weekly scores | — | ✓ | ✓ | — |
+| League transactions | — | ✓ | ✓ | — |
+| Draft results | — | — | ✓ | — |
+| Needs credentials | no | no | your own app | cookies if private |
+
+Nothing in this table is hardcoded in the UI. Each adapter *declares* what it
+can do, and the sync panel is built from that declaration — so a half-finished
+integration offers exactly the buttons it can honour instead of failing on one
+it can't.
+
+### Importing your league's rules
+
+The highest-value sync is **Scoring and roster rules**, because it removes the
+most error-prone setup step there is: retyping a scoring page. It reads your
+league's real settings and shows them as a diff against your config before
+writing anything, since scoring drives every valuation in the app.
+
+Two details worth knowing:
+
+- **Scoring is matched by name, not by internal id.** Yahoo identifies stats
+  numerically, and those numbers are stable but undocumented. Mapping them by
+  hardcoded id means that the day one is wrong, every number in the app is
+  quietly wrong too. So the adapter reads Yahoo's own stat-category names —
+  the same words on your league's settings page — and matches those.
+- **Anything untranslatable is named, never dropped.** A rule this app has no
+  concept of is listed in the result with a reason. A missing scoring rule
+  that vanished silently would change every valuation with nothing on screen
+  to explain why.
+
+Points-allowed scoring is folded up on the way in: platforms express it as one
+stat per band ("Points Allowed 1-6", "7-13", …), and it arrives here as a
+single banded rule.
+
+### Sync teams first
+
+Platform team ids ("1", `nfl.l.184206.t.7`) mean nothing to a league you typed
+in. Syncing **Teams and managers** records each team's platform key, and every
+later sync joins on it. Sync anything else first and it will tell you that
+nothing matched, and why.
+
+Transactions carry the platform's own id, so re-running a sync imports what is
+new and skips what you already have.
 
 ### Yahoo setup
 
@@ -320,11 +365,52 @@ Yahoo has no anonymous read path, so you need a free app of your own:
 Tokens are written to `secrets/yahoo.token.json`, which is gitignored and
 chmod 600. They refresh automatically.
 
-### Adding a platform
+### Wiring your own platform
 
 Implement `PlatformAdapter` in `ff/platforms/`, register it in
-`ff/platforms/__init__.py`, and it appears in the setup wizard automatically.
-The draft board, valuation and trade engines never learn it exists.
+`ff/platforms/__init__.py`, and it appears in the setup wizard and the sync
+panel automatically. The draft board, valuation, waiver and trade engines
+never learn it exists.
+
+You do not have to implement all of it. Declare what you support and the rest
+stays hidden:
+
+```python
+class MyLeagueAdapter(PlatformAdapter):
+    kind, label = "myleague", "My League"
+    setup_fields = (("league_id", "League ID", "From your league URL."),)
+
+    def capabilities(self):
+        return {"league", "rosters", "scoreboard"}   # and no more
+
+    def fetch_scoreboard(self, league_id, week):
+        return {"week": week,
+                "games": [{"home": "1", "away": "2"}],
+                "scores": {"1": 118.42, "2": 102.8},
+                "final": True}
+```
+
+Anything you don't implement raises `PlatformUnsupported`, and the app says
+"My League does not provide draft results" rather than showing an error.
+
+Three conventions make an adapter join up with the rest of the app:
+
+| Return | Shape | Why |
+| --- | --- | --- |
+| Rosters | *our* player ids (`ff.players.make_player_id`) | Platform ids join to no projection, so lineups come back empty |
+| Transaction players | `{"name", "pos", "team"}` | Our ids derive from name and position, so the sync layer rebuilds an exact one |
+| `fetch_rules` | config blocks plus an `unmapped` list | A rule you couldn't translate has to be visible, not absent |
+
+Team ids can be whatever the platform uses — `sync.team_map` joins them to
+your config through the `platform_key` recorded when teams are imported.
+
+Tests go against recorded payload shapes rather than the live API; see
+`tests/fixtures/yahoo_payloads.py` for the pattern. Sleeper's API needs no
+auth, so `tests/test_platforms.py` also carries an opt-in live check:
+
+```bash
+FF_TEST_LIVE_SLEEPER=1 python3 -m unittest tests.test_platforms
+```
 
 ## Layout
 
@@ -342,6 +428,7 @@ ff/
   waivers.py            free agent value, add/drop pairing, FAAB bids
   matchups.py           schedule, weekly results, standings
   transactions.py       the league's roster moves, and replaying them
+  sync.py               platform data -> our ids, our storage, with a report
   trades.py             trade evaluation, legality, suggestion search
   pool.py               scored+valued player pool, cached
   store.py              persistence for picks, rosters, scores, the log
@@ -362,11 +449,15 @@ tests/
   only 12 kickers, the 12th is treated as replacement level and kicker value
   is overstated. Import a full pool.
 - Auction drafts are modelled in the config but the board is snake/linear only.
-- **Nothing is fetched automatically.** Weekly projections, injury statuses,
-  final scores and other managers' transactions are all things the app can
-  hold, reason about and act on — but you enter or import them. The Yahoo
-  adapter reads teams, rosters and settings; it does not yet pull the
-  scoreboard, the transaction log or live stat corrections.
+- **Syncing is a button, not a background job.** Scores, transactions and
+  rules are pulled when you ask for them; nothing polls. Weekly *projections*
+  and injury statuses are still yours to import or set — no platform publishes
+  projections worth trusting.
+- **The Yahoo adapter has not been exercised against the live API.** Its
+  parsers are covered against recorded payload shapes, and the rules importer
+  reproduces this repo's real `keg-south.json` scoring exactly, but the first
+  live sync is worth eyeballing before trusting it. Sleeper's path is
+  verified against the real API.
 - Without a week-specific projection file, weekly numbers are the season total
   divided across the schedule. That is a real number but a blunt one: it knows
   about byes and injuries and nothing about matchups. The Week tab flags when

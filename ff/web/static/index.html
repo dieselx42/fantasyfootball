@@ -303,6 +303,16 @@
     </div>
 
     <div class="panel">
+      <h3>Sync from your platform <span id="syncState" class="pill"></span></h3>
+      <p class="hint">Only what your platform can actually provide is offered
+        here — the buttons are built from the adapter's own declared
+        capabilities, so a partial integration shows exactly what it can do
+        rather than failing on a button that was never going to work.</p>
+      <div id="syncButtons" class="sync-grid"></div>
+      <div id="syncResult" class="sync-result" hidden></div>
+    </div>
+
+    <div class="panel">
       <h3>Projections</h3>
       <p class="hint">Drop in a CSV from any source. Column names are matched
         loosely, so most exports work as-is. Rows are re-scored with your rules.</p>

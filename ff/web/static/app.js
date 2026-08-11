@@ -925,6 +925,145 @@ async function viewPlayers() {
 }
 
 /* ================================================================== *
+ * PLATFORM SYNC
+ *
+ * Every button here comes from the adapter's own capability list, so
+ * adding a platform never means touching this file.
+ * ================================================================== */
+
+async function renderSyncPanel(leagueId) {
+  const box = $('#syncButtons');
+  if (!box) return;
+  box.replaceChildren(el('div', { class: 'hint' }, 'Checking your platform…'));
+
+  let status;
+  try { status = await api(`/api/league/${leagueId}/platform/status`); }
+  catch (err) {
+    box.replaceChildren(el('div', { class: 'hint' }, err.message));
+    return;
+  }
+
+  $('#syncState').textContent = status.ready
+    ? (status.detail || 'Connected') : (status.detail || 'Not connected');
+
+  const supported = (status.capabilities || []).filter(c => c.supported);
+  if (!supported.length) {
+    box.replaceChildren(el('div', { class: 'hint' },
+      `${status.label || 'This platform'} has no sync support — everything is ` +
+      `entered by hand, which works for every feature in the app.`));
+    return;
+  }
+
+  box.replaceChildren(...supported.map(cap => el('button', {
+    class: 'btn ghost sync-btn', type: 'button',
+    disabled: !status.ready || null,
+    onclick: e => runSync(leagueId, cap.key, cap.label, e.target.closest('button')),
+  }, cap.label, el('span', { class: 'cap' }, `sync ${cap.key}`))));
+}
+
+async function runSync(leagueId, operation, label, button) {
+  const out = $('#syncResult');
+  out.hidden = false;
+  out.replaceChildren(el('div', { class: 'hint' }, `Syncing ${label.toLowerCase()}…`));
+  if (button) button.disabled = true;
+
+  let data;
+  try {
+    data = await api(`/api/league/${leagueId}/sync/${operation}`, { method: 'POST' });
+  } catch (err) {
+    out.replaceChildren(el('div', { class: 'warn' }, err.message));
+    return;
+  } finally {
+    if (button) button.disabled = false;
+  }
+
+  if (operation === 'rules') { renderRulesDiff(leagueId, data); return; }
+
+  const notes = [];
+  const push = (key, word) => {
+    const rows = data[key] || [];
+    if (rows.length) notes.push(`${rows.length} ${word}: ${rows.slice(0, 8).join(', ')}`);
+  };
+  push('unmatched_teams', 'teams could not be matched to your league');
+  push('players_not_in_pool', 'players are not in your projection pool');
+  push('dropped_teams', 'teams are no longer in your league');
+  if (data.hint) notes.push(data.hint);
+
+  const headline =
+      operation === 'scoreboard' ? `Week ${data.week}: ${data.teams_scored} scores imported`
+    : operation === 'transactions' ? `${data.imported} moves imported, ${data.already_recorded} already had`
+    : operation === 'rosters' ? `${data.teams_written} rosters written`
+    : operation === 'draft' ? `${data.picks} picks imported`
+    : operation === 'league' ? `${data.teams} teams imported`
+    : 'Done';
+
+  out.replaceChildren(
+    el('div', { class: notes.length ? 'warn' : 'ok' }, headline),
+    notes.length ? el('ul', {}, ...notes.map(n => el('li', {}, n))) : null);
+
+  if (operation === 'league') await loadLeague(leagueId);
+}
+
+/* Scoring drives every valuation in the app, so an imported ruleset is shown
+   before it is written, not after. */
+function renderRulesDiff(leagueId, data) {
+  const out = $('#syncResult');
+  const changes = data.changes || [];
+  const unmapped = data.unmapped || [];
+
+  if (!changes.length) {
+    out.replaceChildren(el('div', { class: 'ok' },
+      'Your league config already matches the platform exactly.'),
+      ...(unmapped.length ? [unmappedList(unmapped)] : []));
+    return;
+  }
+
+  out.replaceChildren(
+    el('div', { class: 'warn' },
+      `${changes.length} rule block(s) differ from your config. Review before applying.`),
+    el('table', {}, ...changes.map(c => el('tr', {},
+      el('td', {}, c.block),
+      el('td', {}, summariseChange(c))))),
+    unmapped.length ? unmappedList(unmapped) : null,
+    el('button', {
+      class: 'btn primary', type: 'button', style: 'margin-top:12px',
+      onclick: async () => {
+        try {
+          await api(`/api/league/${leagueId}/sync/rules/apply`,
+            { method: 'POST', body: { proposed: data.proposed } });
+        } catch (err) { toast(err.message, true); return; }
+        toast('League rules updated from your platform');
+        await loadLeague(leagueId);
+        setView('settings');
+      },
+    }, 'Apply these rules'));
+}
+
+function summariseChange(change) {
+  const after = change.after;
+  if (after && typeof after === 'object' && !Array.isArray(after)) {
+    const before = change.before || {};
+    const keys = Object.keys(after);
+    const diff = keys.filter(k => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+    if (!diff.length) return `${keys.length} settings, all unchanged`;
+    return diff.slice(0, 12).map(k => `${k}: ${JSON.stringify(before[k]) ?? '—'} → ${JSON.stringify(after[k])}`).join(', ')
+      + (diff.length > 12 ? `, +${diff.length - 12} more` : '');
+  }
+  return `${JSON.stringify(change.before) ?? '—'} → ${JSON.stringify(after)}`;
+}
+
+/* Anything the adapter could not translate is named, never dropped quietly —
+   a missing scoring rule would change every valuation with nothing on screen
+   to explain why. */
+function unmappedList(unmapped) {
+  return el('div', {},
+    el('div', { class: 'warn', style: 'margin-top:10px' },
+      `${unmapped.length} platform rule(s) had no equivalent here and were left out:`),
+    el('ul', {}, ...unmapped.map(u =>
+      el('li', {}, `${u.name || u.stat_id} (${u.value}) — ${u.why}`))));
+}
+
+/* ================================================================== *
  * SETTINGS
  * ================================================================== */
 
@@ -949,6 +1088,8 @@ async function viewSettings() {
   bind('#sSeason', league.season, v => { league.season = Number(v) || league.season; });
   bind('#sLeagueKey', league.platform.settings.league_id,
        v => { league.platform.settings.league_id = v; });
+
+  renderSyncPanel(league.id);
 
   $('#sPlatform').replaceChildren(...State.boot.platforms.map(p =>
     el('option', { value: p.kind, selected: league.platform.kind === p.kind }, p.label)));

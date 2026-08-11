@@ -17,9 +17,15 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from .. import config as cfgmod
-from .. import matchups, store, trades, waivers
+from .. import matchups, store, sync, trades, waivers
 from ..draft import DraftState, board_summary, recommend
-from ..platforms import PlatformError, adapter_for, describe_all, get_adapter
+from ..platforms import (
+    PlatformError,
+    PlatformUnsupported,
+    adapter_for,
+    describe_all,
+    get_adapter,
+)
 from ..players import Player, normalize_status, parse_projection_csv
 from ..storage import get_backend
 from ..pool import build_pool, index_by_id, invalidate
@@ -146,9 +152,88 @@ def validate_league(api: Api, params: dict[str, str], body: dict[str, Any]) -> A
 def platform_status(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
     try:
-        return adapter_for(cfg).status()
+        adapter = adapter_for(cfg)
+        status = adapter.status()
+        status["capabilities"] = adapter.describe_capabilities()
+        status["label"] = adapter.label
+        return status
     except PlatformError as exc:
-        return {"ready": False, "detail": str(exc)}
+        return {"ready": False, "detail": str(exc), "capabilities": []}
+
+
+# --------------------------------------------------------------------------
+# Syncing from the platform
+#
+# One route per capability. The UI renders a button for each capability the
+# connected adapter declares, so a new platform integration needs no UI work
+# and a partial one offers exactly what it can deliver.
+# --------------------------------------------------------------------------
+
+def _sync(api: Api, cfg: dict[str, Any], operation: str) -> Any:
+    """Run one sync operation, turning platform failures into clean errors."""
+    try:
+        if operation == "league":
+            result = sync.sync_league(cfg)
+            cfgmod.save(cfg)
+            invalidate(cfg["id"])
+            return result
+
+        if operation == "rules":
+            return sync.sync_rules(cfg)
+
+        if operation == "rosters":
+            return sync.sync_rosters(cfg, build_pool(cfg))
+
+        if operation == "transactions":
+            return sync.sync_transactions(cfg, build_pool(cfg))
+
+        if operation == "draft":
+            return sync.sync_draft(cfg, build_pool(cfg))
+
+        if operation == "scoreboard":
+            week = _week_arg(api, cfg, {})
+            result = sync.sync_scoreboard(cfg, week)
+            # The platform's real fixtures beat our generated round robin.
+            if sync.merge_schedule(cfg, week, result.get("games") or []):
+                cfgmod.save(cfg)
+            return result
+    except PlatformUnsupported as exc:
+        raise ApiError(str(exc), 501) from exc
+    except PlatformError as exc:
+        raise ApiError(str(exc), 502) from exc
+
+    raise ApiError(f"Nothing syncs '{operation}'.", 404)
+
+
+@route("POST", "/api/league/<league_id>/sync/<operation>")
+def run_sync(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    cfg = api.load_cfg(params["league_id"])
+    return _sync(api, cfg, params["operation"])
+
+
+@route("POST", "/api/league/<league_id>/sync/rules/apply")
+def apply_synced_rules(api: Api, params: dict[str, str], body: dict[str, Any]) -> Any:
+    """Write imported scoring and roster rules into the league config.
+
+    Separate from reading them on purpose: scoring drives every valuation in
+    the app, so overwriting it is a decision worth confirming rather than a
+    side effect of pressing sync.
+    """
+    cfg = api.load_cfg(params["league_id"])
+    proposed = body.get("proposed")
+    if not isinstance(proposed, dict) or not proposed:
+        raise ApiError("Nothing to apply.")
+
+    written = sync.apply_rules(cfg, proposed)
+    problems = cfgmod.validate(cfg)
+    if problems:
+        raise ApiError(
+            "The imported rules did not validate, so nothing was changed: "
+            + "; ".join(problems)
+        )
+    cfgmod.save(cfg)
+    invalidate(cfg["id"])
+    return {"ok": True, "applied": written, "league": cfg}
 
 
 @route("POST", "/api/league/<league_id>/platform/import")
