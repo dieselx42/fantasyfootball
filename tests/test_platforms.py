@@ -384,6 +384,91 @@ class TestCredentialsStayOutOfConfigs(unittest.TestCase):
         self.assertEqual(adapter.credential("client_id"), "TYPED")
 
 
+SCHEDULE_CSV = """game_id,season,game_type,week,away_team,home_team
+1,2026,REG,1,ATL,DET
+2,2026,REG,1,SF,LAR
+3,2026,REG,2,DET,SF
+4,2026,REG,2,LAR,ATL
+5,2026,REG,3,DET,LAR
+6,2026,REG,3,ATL,SF
+7,2025,REG,1,ATL,DET
+8,2026,POST,4,DET,SF
+"""
+
+
+class TestByeWeeks(unittest.TestCase):
+    """No fantasy platform publishes byes, and a projection that does not know
+    about one recommends starting a player who cannot score."""
+
+    def test_a_bye_is_the_week_a_team_does_not_play(self):
+        from ff import nfl
+
+        byes = nfl.parse_bye_weeks(SCHEDULE_CSV, 2026)
+        # Every team plays weeks 1-3 here except where the fixture omits them.
+        self.assertEqual(byes, {})
+
+    def test_the_team_missing_a_week_gets_that_bye(self):
+        from ff import nfl
+
+        csv_text = SCHEDULE_CSV.replace("5,2026,REG,3,DET,LAR\n", "")
+        byes = nfl.parse_bye_weeks(csv_text, 2026)
+        self.assertEqual(byes["DET"], 3)
+        self.assertEqual(byes["LAR"], 3)
+        self.assertNotIn("ATL", byes)
+
+    def test_other_seasons_and_the_postseason_are_ignored(self):
+        from ff import nfl
+
+        csv_text = SCHEDULE_CSV.replace("5,2026,REG,3,DET,LAR\n", "")
+        self.assertEqual(nfl.parse_bye_weeks(csv_text, 2026)["DET"], 3)
+        # 2025 has a single game, so every team there misses weeks 2 and 3 —
+        # more than one missing week is not a bye, it is a partial schedule.
+        self.assertEqual(nfl.parse_bye_weeks(csv_text, 2025), {})
+
+    def test_team_abbreviations_are_normalised(self):
+        from ff import nfl
+
+        # Week 2 belongs to another pairing, so JAX and WSH sit it out.
+        csv_text = (
+            "game_id,season,game_type,week,away_team,home_team\n"
+            "1,2026,REG,1,JAX,WSH\n"
+            "2,2026,REG,2,DET,ATL\n"
+            "3,2026,REG,3,JAX,WSH\n"
+        )
+        byes = nfl.parse_bye_weeks(csv_text, 2026)
+        # JAX and WSH are how nflverse spells them; we use JAC and WAS.
+        self.assertEqual(byes.get("JAC"), 2)
+        self.assertEqual(byes.get("WAS"), 2)
+        self.assertNotIn("JAX", byes)
+
+    def test_applying_byes_does_not_overwrite_an_imported_one(self):
+        from ff import nfl
+
+        supplied = Player(player_id="a", name="A", pos="RB", team="DET", bye=9)
+        derived = Player(player_id="b", name="B", pos="RB", team="DET")
+        filled = nfl.apply_bye_weeks([supplied, derived], {"DET": 5})
+        self.assertEqual(supplied.bye, 9)   # a hand-supplied value wins
+        self.assertEqual(derived.bye, 5)
+        self.assertEqual(filled, 1)
+
+    def test_a_player_with_no_team_is_left_alone(self):
+        from ff import nfl
+
+        free_agent = Player(player_id="a", name="A", pos="RB", team="")
+        self.assertEqual(nfl.apply_bye_weeks([free_agent], {"DET": 5}), 0)
+        self.assertIsNone(free_agent.bye)
+
+    def test_the_bye_survives_the_csv_round_trip(self):
+        """It is derived after the fetch and written into the CSV, so a
+        missing Bye column would silently discard every one of them."""
+        from ff.players import parse_projection_csv
+
+        player = Player(player_id="a", name="Bijan Robinson", pos="RB",
+                        team="ATL", stats={"rush_yd": 1400.0}, bye=11)
+        parsed = parse_projection_csv(sync.projections_to_csv([player]), "s")[0]
+        self.assertEqual(parsed.bye, 11)
+
+
 class TestProjectionImport(unittest.TestCase):
     """Synced projections go through the CSV importer, not around it."""
 

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
 
-from . import store
+from . import nfl, store
 from .config import slugify
 from .players import Player, make_player_id, normalize_name, normalize_pos
 from .platforms import PlatformError, adapter_for
@@ -487,7 +487,7 @@ def _iso(timestamp: Any) -> str:
 #: names loosely, and our own canonical stat keys are among the names it
 #: recognises, so a synced set parses through exactly the same code as a
 #: hand-dropped CSV — no second import path to keep in step.
-PROJECTION_COLUMNS = ("Player", "Team", "Pos", "Week", "ADP", "Status", "Opp")
+PROJECTION_COLUMNS = ("Player", "Team", "Pos", "Bye", "Week", "ADP", "Status", "Opp")
 
 
 def projections_to_csv(players: Sequence[Player]) -> str:
@@ -509,6 +509,7 @@ def projections_to_csv(players: Sequence[Player]) -> str:
             player.name,
             player.team,
             player.pos,
+            player.bye or "",
             player.week if player.week is not None else "",
             player.adp if player.adp else "",
             player.status,
@@ -533,21 +534,41 @@ def sync_projections(
     if not players:
         return {"imported": 0, "detail": "The platform returned no projections."}
 
+    # No fantasy platform publishes bye weeks reliably, and a projection that
+    # does not know about one will cheerfully recommend starting a player who
+    # cannot score. Derived from the NFL schedule instead — and treated as
+    # optional, because unknown byes should weaken the advice, not break the
+    # import.
+    byes_filled = 0
+    bye_note = ""
+    try:
+        byes_filled = nfl.apply_bye_weeks(players, nfl.bye_weeks(year))
+    except nfl.ScheduleError as exc:
+        bye_note = (
+            f"Bye weeks are unknown: {exc}. Players on bye will be projected "
+            f"as though they play — import a CSV with a Bye column, or retry."
+        )
+
     name = f"{adapter.kind}-{year}" + (f"-wk{week}" if week is not None else "-season")
     get_backend().save_projection_set(f"{name}.csv", projections_to_csv(players))
 
     counts: dict[str, int] = {}
     for player in players:
         counts[player.pos] = counts.get(player.pos, 0) + 1
-    return {
+    result = {
         "imported": len(players),
         "file": f"{name}.csv",
         "week": week,
         "season": year,
         "by_position": counts,
         "with_adp": sum(1 for p in players if p.adp),
+        "with_bye": sum(1 for p in players if p.bye),
+        "byes_filled": byes_filled,
         "scope": "week" if week is not None else "season",
     }
+    if bye_note:
+        result["hint"] = bye_note
+    return result
 
 
 def sync_draft(cfg: Mapping[str, Any], pool: Sequence[Player]) -> dict[str, Any]:
