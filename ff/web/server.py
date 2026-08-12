@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .. import config as cfgmod
 from .. import matchups, store, sync, trades, waivers
-from ..draft import DraftState, board_summary, recommend
+from ..draft import DraftState, board_summary, draft_plan, recommend
 from ..platforms import (
     PlatformError,
     PlatformUnsupported,
@@ -452,6 +452,38 @@ def draft_recommend(api: Api, params: dict[str, str], _body: dict[str, Any]) -> 
         "recommendations": recommend(state, pool, team_id, int(api.arg("limit") or 12)),
         "roster": [p.to_dict() for p in roster],
         "lineup": describe_lineup(roster, cfg),
+    }
+
+
+@route("GET", "/api/league/<league_id>/draft/plan")
+def draft_plan_route(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    """Round-by-round: what the board is likely to look like at each of your
+    picks. The live board answers "who now"; this answers "what does round 4
+    look like from pick 6", which is the question you have the week before."""
+    cfg = api.load_cfg(params["league_id"])
+    team_id = api.arg("team") or cfg.get("my_team_id")
+    if not team_id:
+        raise ApiError("Pick a team first.")
+    if not (cfg.get("draft") or {}).get("order"):
+        raise ApiError(
+            "Set your draft order first — without it there is no way to know "
+            "where you pick, and the whole plan depends on that."
+        )
+
+    state = _draft_state(cfg)
+    pool = build_pool(cfg)
+    plan = draft_plan(
+        cfg, pool, team_id,
+        per_pick=int(api.arg("limit") or 5),
+        taken=state.drafted_ids(),
+    )
+    return {
+        "team_id": team_id,
+        "slot": (cfg["draft"]["order"].index(team_id) + 1) if team_id in cfg["draft"]["order"] else None,
+        "teams": cfg.get("team_count"),
+        "plan": plan,
+        "with_adp": sum(1 for p in pool if p.adp),
+        "pool": len(pool),
     }
 
 

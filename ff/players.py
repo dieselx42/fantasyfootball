@@ -75,7 +75,7 @@ STATUS_ALIASES = {
     "o": "O", "out": "O", "inactive": "O",
     "ir": "IR", "injured reserve": "IR", "ir-r": "IR", "pup": "IR", "nfi": "IR",
     "sus": "SUS", "susp": "SUS", "suspended": "SUS",
-    "na": "NA", "n/a": "NA", "not active": "NA",
+    "na": "NA", "n/a": "NA", "not active": "NA", "dnr": "NA",
     "bye": "BYE",
 }
 

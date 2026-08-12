@@ -444,6 +444,78 @@ class TestResults(unittest.TestCase):
 # Transactions
 # --------------------------------------------------------------------------
 
+class TestDraftPlan(unittest.TestCase):
+    """What each round looks like from your slot, before the draft starts."""
+
+    def setUp(self):
+        from ff.draft import draft_plan
+
+        self.plan_fn = draft_plan
+        self.cfg = league(10)
+        self.cfg["draft"] = {**self.cfg["draft"], "rounds": 3, "type": "snake",
+                             "order": [t["id"] for t in self.cfg["teams"]]}
+        self.me = self.cfg["teams"][5]["id"]          # pick 6 of 10
+        self.pool = []
+        for i in range(1, 61):
+            p = player(f"Player {i:02d}", "RB", 200 - i * 2)
+            p.adp = float(i)
+            p.vor = float(200 - i * 2)
+            self.pool.append(p)
+
+    def plan(self, **kw):
+        return self.plan_fn(self.cfg, self.pool, self.me, **kw)
+
+    def test_one_entry_per_pick_you_own(self):
+        rows = self.plan()
+        self.assertEqual([r["round"] for r in rows], [1, 2, 3])
+        self.assertEqual([r["overall"] for r in rows], [6, 15, 26])
+
+    def test_a_player_going_well_before_your_pick_is_not_likely(self):
+        first = self.plan()[0]
+        likely = {p["name"] for p in first["likely"]}
+        self.assertNotIn("Player 01", likely)
+        self.assertIn("Player 01", {p["name"] for p in first["gone"]})
+
+    def test_odds_fall_as_the_draft_goes_on(self):
+        """The same player is less likely to survive to a later pick."""
+        rows = self.plan(per_pick=40)
+        odds = {}
+        for row in rows:
+            for group in ("likely", "toss_up", "gone"):
+                for p in row[group]:
+                    odds.setdefault(p["name"], []).append(p["odds"])
+        falling = [v for v in odds.values() if len(v) == 3]
+        self.assertTrue(falling)
+        for series in falling:
+            self.assertGreaterEqual(series[0], series[-1])
+
+    def test_players_already_drafted_are_excluded(self):
+        rows = self.plan(taken={self.pool[20].player_id})
+        names = {p["name"] for r in rows for g in ("likely", "toss_up", "gone")
+                 for p in r[g]}
+        self.assertNotIn(self.pool[20].name, names)
+
+    def test_best_available_is_the_top_likely_one(self):
+        first = self.plan()[0]
+        self.assertEqual(first["best_available_vor"], first["likely"][0]["vor"])
+
+    def test_without_an_explicit_order_it_falls_back_to_the_team_list(self):
+        """Same fallback build_slots uses, so the plan and the live board
+        always agree about where you pick. Whether a *guess* at the order is
+        good enough to show someone is a question for the API layer, which
+        refuses rather than implying it knows."""
+        self.cfg["draft"] = {**self.cfg["draft"], "order": []}
+        rows = self.plan()
+        self.assertEqual([r["overall"] for r in rows], [6, 15, 26])
+
+    def test_players_without_adp_are_skipped(self):
+        """Every odds figure comes from ADP; without one there is nothing to
+        say, and a guess would look like knowledge."""
+        for p in self.pool:
+            p.adp = None
+        self.assertEqual(self.plan(), [])
+
+
 class TestTransactions(unittest.TestCase):
     def setUp(self):
         self.cfg = league(4)

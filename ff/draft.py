@@ -10,7 +10,7 @@ impossible for the board to drift out of sync with reality.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from .config import draft_order, roster_capacity
 from .players import Player
@@ -239,6 +239,83 @@ def _survival_odds(adp: float, at_pick: int) -> float:
     delta = adp - at_pick
     ratio = 0.5 + delta / (2 * spread)
     return max(0.02, min(0.98, ratio))
+
+
+def survival_odds(adp: float, at_pick: int) -> float:
+    """Public alias — the draft plan is built on the same model as run risk."""
+    return _survival_odds(adp, at_pick)
+
+
+#: Odds above which a player is worth planning around, and below which he is
+#: a long shot. The band between them is where drafts are actually decided:
+#: the players you may or may not get, and therefore the ones worth taking a
+#: round early.
+LIKELY = 0.65
+GONE = 0.35
+
+
+def draft_plan(
+    cfg: Mapping[str, Any],
+    pool: Sequence[Player],
+    team_id: str,
+    per_pick: int = 5,
+    taken: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    """Who is likely to be there at each of your picks, round by round.
+
+    The draft board answers "who should I take *now*". This answers the
+    question you have the week before: given where you pick, what does each
+    round actually look like? Both run on the same ADP survival model, so the
+    plan and the live board never disagree with each other.
+
+    Three groups per pick, because they call for different preparation:
+
+      * **likely** — expect these; plan around them
+      * **toss-up** — the ones worth reaching a round early for, since this
+        is where the pick is genuinely decided
+      * **gone** — good players you will not get at this slot, listed so you
+        stop planning around them
+    """
+    already = set(taken)
+    candidates = [
+        p for p in pool
+        if p.adp and p.player_id not in already and p.vor > 0
+    ]
+    if not candidates:
+        return []
+
+    order = draft_order(cfg)
+    if team_id not in order:
+        return []
+
+    plan: list[dict[str, Any]] = []
+    for slot in build_slots(cfg):
+        if slot.team_id != team_id:
+            continue
+        odds = [(p, survival_odds(p.adp, slot.overall)) for p in candidates]
+        by_value = sorted(odds, key=lambda row: row[0].vor, reverse=True)
+
+        def take(low: float, high: float) -> list[dict[str, Any]]:
+            return [
+                {**player.to_dict(), "odds": round(chance, 2)}
+                for player, chance in by_value
+                if low <= chance < high
+            ][:per_pick]
+
+        likely = take(LIKELY, 1.01)
+        plan.append(
+            {
+                "round": slot.round,
+                "overall": slot.overall,
+                "likely": likely,
+                "toss_up": take(GONE, LIKELY),
+                "gone": take(0.0, GONE),
+                # What the best realistically-available player is worth, which
+                # is the number that tells you whether a round is rich or thin.
+                "best_available_vor": round(likely[0]["vor"], 1) if likely else None,
+            }
+        )
+    return plan
 
 
 def _reason(
