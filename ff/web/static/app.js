@@ -345,7 +345,26 @@ async function viewDraft() {
     viewDraft();
   };
 
-  $('#search').oninput = e => { State.search = e.target.value.toLowerCase(); renderAvailable(); };
+  /* Draft-night entry is the bottleneck: you are mirroring nine other
+     managers' picks between your own, against a pick clock. Enter drafts the
+     top match, so a pick is "type three letters, Enter" without the mouse. */
+  const search = $('#search');
+  search.oninput = e => { State.search = e.target.value.toLowerCase(); renderAvailable(); };
+  search.onkeydown = e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const top = topAvailable();
+    if (!top) { toast('No player matches that.', true); return; }
+    draftPlayer(top);
+  };
+  // The board exists to be typed into, so it takes focus on arrival and keeps
+  // it through every re-render — otherwise each of the nine picks between
+  // your turns costs a click back into the box before you can type.
+  search.value = '';
+  State.search = '';
+  State.keepFocus = false;
+  const busy = document.activeElement;
+  if (!busy || busy === document.body || busy.tagName === 'INPUT') search.focus();
 
   $('#posChips').replaceChildren(...POS_ALL.map(pos =>
     el('button', {
@@ -413,15 +432,23 @@ function renderRecent() {
     : [el('div', { class: 'hint' }, 'No picks yet.')]));
 }
 
-function renderAvailable() {
+/* Everyone still on the board, best first — the single source of truth for
+   both the list and what Enter drafts, so they can never disagree. */
+function availablePlayers() {
   const taken = new Set((State.draft.picks || [])
     .filter(p => p.player_id).map(p => p.player_id));
-
-  const rows = State.pool
+  return State.pool
     .filter(p => !taken.has(p.player_id))
     .filter(p => State.posFilter === 'ALL' || p.pos === State.posFilter)
-    .filter(p => !State.search || p.name.toLowerCase().includes(State.search))
-    .slice(0, 200);
+    .filter(p => !State.search || p.name.toLowerCase().includes(State.search));
+}
+
+function topAvailable() {
+  return availablePlayers()[0] || null;
+}
+
+function renderAvailable() {
+  const rows = availablePlayers().slice(0, 200);
 
   $('#avail').replaceChildren(...rows.map(p =>
     el('div', { class: 'prow', title: 'Click to draft', onclick: () => draftPlayer(p) },
@@ -479,6 +506,7 @@ async function draftPlayer(player, teamId) {
       body: { player_id: player.player_id, team_id: teamId || undefined },
     });
     toast(`Drafted ${player.name}.`);
+    State.keepFocus = true;         // stay on the keyboard for the next pick
     viewDraft();
   } catch (err) { toast(err.message, true); }
 }
