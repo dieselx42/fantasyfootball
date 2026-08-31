@@ -38,6 +38,11 @@ from ..weekly import availability_note, has_weekly_projections, season_weeks, we
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# Trade search is exhaustive over pairings, so it is bounded rather than
+# unbounded. A ten-team league yields a few hundred legal deals; this only
+# has to be comfortably above that for the per-partner counts to be honest.
+MAX_TRADE_SEARCH = 2000
+
 Route = Callable[["Api", dict[str, str], dict[str, Any]], Any]
 _ROUTES: list[tuple[str, re.Pattern[str], Route]] = []
 
@@ -600,14 +605,33 @@ def suggest_trades(api: Api, params: dict[str, str], _body: dict[str, Any]) -> A
 
     week = api.arg("week")
     others = {tid: players for tid, players in rosters.items() if tid != team_id}
-    suggestions = trades.suggest(
-        cfg,
-        rosters[team_id],
-        others,
-        week=int(week) if week else None,
-        limit=int(api.arg("limit") or 10),
+    partner = api.arg("partner") or None
+    if partner and partner not in others:
+        raise ApiError(f"No roster for '{partner}'.", 404)
+
+    # Search once and slice, rather than searching again per partner — the
+    # pairing search is the expensive part of this route.
+    everything = trades.suggest(
+        cfg, rosters[team_id], others,
+        week=int(week) if week else None, limit=MAX_TRADE_SEARCH,
     )
-    return {"team_id": team_id, "suggestions": suggestions, "teams": cfg.get("teams", [])}
+    # How many each rival has, so the UI can list them all and say plainly
+    # when one has nothing. "No deals with Baker's" is an answer, not a gap.
+    counts: dict[str, int] = {}
+    for deal in everything:
+        counts[deal["partner_team_id"]] = counts.get(deal["partner_team_id"], 0) + 1
+
+    shown = everything
+    if partner:
+        # Grouping preserved the best-first order, so filtering still ranks.
+        shown = [d for d in everything if d["partner_team_id"] == partner]
+    return {
+        "team_id": team_id,
+        "partner": partner,
+        "suggestions": shown[: int(api.arg("limit") or 10)],
+        "partner_counts": counts,
+        "teams": cfg.get("teams", []),
+    }
 
 
 @route("POST", "/api/league/<league_id>/trades/save")

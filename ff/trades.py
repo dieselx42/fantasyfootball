@@ -277,13 +277,23 @@ def suggest(
     week: int | None = None,
     limit: int = 10,
     max_per_side: int | None = None,
+    partner: str | None = None,
 ) -> list[dict[str, Any]]:
     """Generate trades worth proposing, best first.
 
     Searches every 1-for-1 and (where legal) 2-for-1 pairing between your
     surplus and each partner's, keeping only deals that are legal under your
     league's rules and that improve both starting lineups.
+
+    Results are spread across partners rather than ranked purely by your own
+    gain: one rival whose surplus happens to match your holes can otherwise
+    produce every deal in the list, and you never learn the other nine teams
+    had anything to offer. Pass ``partner`` to drill into a single team, which
+    does rank strictly best-first.
     """
+    if partner is not None:
+        other_rosters = {k: v for k, v in other_rosters.items() if k == partner}
+
     rules = _rules(cfg)
     cap = int(max_per_side or rules.get("max_players_per_side") or 2)
     cap = max(1, min(cap, 3))
@@ -324,7 +334,33 @@ def suggest(
         ),
         reverse=True,
     )
-    return _dedupe(results)[:limit]
+    ranked = _dedupe(results)
+    if partner is not None:
+        return ranked[:limit]
+    return _spread_across_partners(ranked)[:limit]
+
+
+def _spread_across_partners(ranked: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Your best offer to each rival, then your second-best to each, and so on.
+
+    ``ranked`` is already in best-first order and grouping preserves it, so
+    every team's list stays correctly sorted; only the interleaving is new.
+    Partners are ordered by their own best deal, so the single strongest offer
+    is still the first thing you see.
+    """
+    by_partner: dict[str, list[dict[str, Any]]] = {}
+    for result in ranked:
+        by_partner.setdefault(result["partner_team_id"], []).append(result)
+    if not by_partner:
+        return []
+
+    order = sorted(by_partner, key=lambda t: -by_partner[t][0]["team_a"]["lineup_gain"])
+    out: list[dict[str, Any]] = []
+    for rank in range(max(len(deals) for deals in by_partner.values())):
+        for team_id in order:
+            if rank < len(by_partner[team_id]):
+                out.append(by_partner[team_id][rank])
+    return out
 
 
 def _tradeable(

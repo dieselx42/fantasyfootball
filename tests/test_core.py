@@ -582,6 +582,40 @@ class TestTrades(unittest.TestCase):
         self.assertNotEqual(result["verdict"], "win-win")
         self.assertGreater(result["gap_pct"], self.cfg["trades"]["fairness"]["max_value_gap_pct"])
 
+    def test_one_rival_cannot_monopolise_the_suggestion_list(self):
+        """Ranking purely by your own gain let the single best-matched rival
+        fill every slot, so the other teams were invisible however many
+        legal deals they had."""
+        rich = self.b                                   # deep WR surplus, matches A's hole
+        poor = [player("C QB", "QB", 250, vor=5), player("C RB1", "RB", 150, vor=5),
+                player("C RB2", "RB", 140, vor=4), player("C WR1", "WR", 190, vor=30),
+                player("C WR2", "WR", 185, vor=25), player("C WR3", "WR", 182, vor=22),
+                player("C TE", "TE", 140, vor=30), player("C K", "K", 125, vor=5),
+                player("C DST", "DST", 115, vor=5)]
+        found = trades.suggest(self.cfg, self.a, {"rich": rich, "poor": poor}, limit=6)
+        partners = {d["partner_team_id"] for d in found}
+        self.assertEqual(partners, {"rich", "poor"}, "both partners must be reachable")
+        # The single strongest offer still leads.
+        self.assertEqual(found[0]["team_a"]["lineup_gain"],
+                         max(d["team_a"]["lineup_gain"] for d in found))
+
+    def test_filtering_to_one_partner_ranks_best_first_within_veto_tier(self):
+        """Approvable deals lead, then the ones that may draw a veto; each
+        block is sorted by your gain. Asserting one flat descending run would
+        pass here by luck and break the moment a lopsided deal appears."""
+        found = trades.suggest(self.cfg, self.a, {"b": self.b}, limit=20, partner="b")
+        self.assertTrue(found)
+        self.assertTrue(all(d["partner_team_id"] == "b" for d in found))
+
+        risky = [d["veto_risk"] for d in found]
+        self.assertEqual(risky, sorted(risky), "safe deals must come before risky ones")
+        for flag in (False, True):
+            gains = [d["team_a"]["lineup_gain"] for d in found if d["veto_risk"] is flag]
+            self.assertEqual(gains, sorted(gains, reverse=True))
+
+    def test_filtering_to_an_unknown_partner_returns_nothing(self):
+        self.assertEqual(trades.suggest(self.cfg, self.a, {"b": self.b}, partner="ghost"), [])
+
     def test_verdict_never_contradicts_the_points_it_reports(self):
         """A "win-win" must never sit on top of a side whose points fall.
 

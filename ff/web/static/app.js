@@ -868,21 +868,46 @@ async function viewTrades() {
   const nameOf = tid =>
     (State.league.teams || []).find(t => t.id === tid)?.name || tid;
 
-  $('#btnSuggest').onclick = async () => {
+  const partnerPicker = $('#tradePartner');
+  // Rebuilt after each search so every rival is listed with how many deals he
+  // actually has. Before this you only ever saw whichever team the ranking
+  // happened to favour, with no way to ask about the other nine.
+  const fillPartners = counts => {
+    const chosen = partnerPicker.value;
+    const options = [el('option', { value: '' }, 'All teams')];
+    for (const t of State.league.teams || []) {
+      if (t.id === picker.value) continue;
+      const n = counts?.[t.id];
+      options.push(el('option',
+        { value: t.id, ...(counts && !n ? { disabled: 'disabled' } : {}) },
+        counts ? `${t.name} (${n || 'none'})` : t.name));
+    }
+    partnerPicker.replaceChildren(...options);
+    partnerPicker.value = chosen;
+  };
+  fillPartners(null);
+
+  const search = async () => {
     $('#tradeList').replaceChildren(el('div', { class: 'hint' }, 'Searching…'));
     let data;
+    const partner = partnerPicker.value
+      ? `&partner=${encodeURIComponent(partnerPicker.value)}` : '';
     try {
-      data = await api(`/api/league/${id}/trades/suggest?team=${encodeURIComponent(picker.value)}`);
+      data = await api(
+        `/api/league/${id}/trades/suggest?team=${encodeURIComponent(picker.value)}${partner}`);
     } catch (err) {
       $('#tradeList').replaceChildren(el('div', { class: 'hint' }, err.message));
       return;
     }
+    fillPartners(data.partner_counts);
 
     if (!data.suggestions.length) {
+      const who = data.partner ? nameOf(data.partner) : 'any team';
       $('#tradeList').replaceChildren(el('div', { class: 'empty' },
-        el('h3', {}, 'No trades worth proposing'),
+        el('h3', {}, `No trades worth proposing with ${who}`),
         el('p', {}, 'Every legal pairing either breaks a league rule or fails to ' +
-                    'improve both starting lineups.')));
+                    'improve both starting lineups.' +
+                    (data.partner ? ' Try “All teams”.' : ''))));
       return;
     }
 
@@ -908,6 +933,10 @@ async function viewTrades() {
           el('div', { class: 'side' }, el('h4', {}, 'You get'), chunk(t.team_a.receives))),
         el('ul', { class: 'notes' }, ...(t.notes || []).map(n => el('li', {}, n))))));
   };
+
+  $('#btnSuggest').onclick = search;
+  partnerPicker.onchange = search;
+  picker.onchange = () => { partnerPicker.value = ''; fillPartners(null); };
 }
 
 /* ================================================================== *
