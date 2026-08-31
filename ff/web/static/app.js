@@ -541,12 +541,16 @@ async function viewWeek() {
   $('#wkTeam').value = State.league.my_team_id || teams[0]?.id || '';
   $('#wkTeam').onchange = () => refresh();
   $('#wkPicker').onchange = () => { State.week = Number($('#wkPicker').value); refresh(); };
+  $('#wkWatchAdd').onclick = addWatch;
+  $('#wkWatchName').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addWatch(); } };
 
+  await loadWatchOptions();
   await refresh();
 
   async function refresh() {
     await loadWeek();
     await loadWaivers();
+    await loadWatchlist();
   }
 
   function query(extra = {}) {
@@ -625,6 +629,79 @@ async function viewWeek() {
         el('div', { class: 'score' },
           final ? num(game.opponent_points) : num(game.opponent_projected)),
         el('div', { class: 'meta' }, final ? 'final' : 'projected')));
+  }
+
+  async function loadWatchlist() {
+    const box = $('#wkWatchlist');
+    let data;
+    try { data = await api(`/api/league/${id}/watchlist?${query()}`); }
+    catch (err) { box.replaceChildren(el('div', { class: 'hint' }, err.message)); return; }
+
+    const free = data.watchlist.filter(r => r.available).length;
+    $('#wkWatchCount').textContent = data.watchlist.length
+      ? `${free} of ${data.watchlist.length} claimable` : '';
+
+    // The alert is the whole reason the list exists: somebody dropped a
+    // player you were waiting on, and waivers run tonight.
+    const alerts = $('#wkWatchAlerts');
+    alerts.hidden = !data.alerts.length;
+    alerts.replaceChildren(...data.alerts.map(m => el('div', {}, m)));
+
+    const nameOfTeam = tid =>
+      (data.teams || []).find(t => t.id === tid)?.name || tid;
+
+    if (!data.watchlist.length) {
+      box.replaceChildren(el('div', { class: 'hint' },
+        'Nobody watched yet. Add the backup behind a starter you like, or ' +
+        'anyone a rival is likely to give up on.'));
+      return;
+    }
+    box.replaceChildren(...data.watchlist.map(r => el('div', { class: 'prow' },
+      el('span', { class: `pos ${r.player?.pos || ''}` }, r.player?.pos || '?'),
+      el('div', {}, r.name,
+        el('div', { class: 'meta' },
+          r.available ? 'FREE AGENT — claimable now'
+            : r.mine ? 'on your roster'
+            : `rostered by ${nameOfTeam(r.owner_team_id)}`,
+          r.note ? ` · ${r.note}` : '')),
+      el('span', { class: 'num2' }, r.player ? num(r.player.season_points, 0) : '—'),
+      el('button', {
+        class: 'btn small', type: 'button', title: 'Stop watching',
+        onclick: async () => {
+          try {
+            await api(`/api/league/${id}/watchlist/${encodeURIComponent(r.player_id)}`,
+                      { method: 'DELETE' });
+            await loadWatchlist();
+          } catch (err) { toast(err.message, true); }
+        },
+      }, '×'))));
+  }
+
+  async function addWatch() {
+    const field = $('#wkWatchName');
+    const typed = field.value.trim();
+    if (!typed) return;
+    const match = State.watchIndex?.get(typed.toLowerCase());
+    if (!match) { toast(`No player called "${typed}".`, true); return; }
+    try {
+      await api(`/api/league/${id}/watchlist`, {
+        method: 'POST',
+        body: { player_id: match, note: $('#wkWatchNote').value.trim() },
+      });
+      field.value = '';
+      $('#wkWatchNote').value = '';
+      await loadWatchlist();
+    } catch (err) { toast(err.message, true); }
+  }
+
+  async function loadWatchOptions() {
+    try {
+      const data = await api(`/api/league/${id}/players?limit=1200`);
+      State.watchIndex = new Map(data.players.map(p =>
+        [`${p.name} (${p.pos})`.toLowerCase(), p.player_id]));
+      $('#wkWatchOptions').replaceChildren(...data.players.map(p =>
+        el('option', { value: `${p.name} (${p.pos})` })));
+    } catch { /* the field still works if you know the exact name */ }
   }
 
   async function loadWaivers() {

@@ -728,6 +728,42 @@ def set_player_status(api: Api, params: dict[str, str], body: dict[str, Any]) ->
     return {"ok": True, "week": week, "player_id": player_id, "status": status}
 
 
+@route("GET", "/api/league/<league_id>/watchlist")
+def get_watchlist(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    """Players you are waiting on, and whether they are claimable yet."""
+    cfg = api.load_cfg(params["league_id"])
+    week = _week_arg(api, cfg, params)
+    pool, rosters = _weekly_view(cfg, week)
+    rows = waivers.resolve_watchlist(
+        store.list_watchlist(cfg["id"]), pool, rosters,
+        api.arg("team") or cfg.get("my_team_id"),
+    )
+    return {
+        "week": week,
+        "watchlist": rows,
+        "alerts": waivers.watchlist_alerts(rows),
+        "teams": cfg.get("teams", []),
+    }
+
+
+@route("POST", "/api/league/<league_id>/watchlist")
+def add_to_watchlist(api: Api, params: dict[str, str], body: dict[str, Any]) -> Any:
+    cfg = api.load_cfg(params["league_id"])
+    player_id = (body.get("player_id") or "").strip()
+    if not player_id:
+        raise ApiError("Which player?")
+    if player_id not in index_by_id(build_pool(cfg)):
+        raise ApiError(f"No player '{player_id}' in the pool.", 404)
+    store.watch_player(cfg["id"], player_id, str(body.get("note") or "").strip())
+    return {"ok": True, "player_id": player_id}
+
+
+@route("DELETE", "/api/league/<league_id>/watchlist/<player_id>")
+def remove_from_watchlist(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
+    cfg = api.load_cfg(params["league_id"])
+    return {"ok": store.unwatch_player(cfg["id"], params["player_id"])}
+
+
 @route("GET", "/api/league/<league_id>/waivers")
 def get_waivers(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])

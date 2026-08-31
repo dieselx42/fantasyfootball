@@ -109,6 +109,23 @@ class Backend:
         """Store an override, or clear it when ``status`` is empty."""
         raise NotImplementedError
 
+    # -- watchlist --------------------------------------------------------
+    #
+    # Players you want to be told about the moment they come loose. Most are
+    # on somebody else's bench when you add them, which is the point: the
+    # pickup you want is decided long before it is available.
+
+    def list_watchlist(self, league_id: str) -> list[dict[str, Any]]:
+        """Rows of {player_id, note, added}, oldest first."""
+        raise NotImplementedError
+
+    def watch_player(self, league_id: str, player_id: str, note: str, added: str) -> None:
+        """Add or update a watch. Re-watching keeps the original ``added``."""
+        raise NotImplementedError
+
+    def unwatch_player(self, league_id: str, player_id: str) -> bool:
+        raise NotImplementedError
+
     # -- projections ------------------------------------------------------
     #
     # Stored as the raw CSV text under a name, exactly as uploaded. Parsing

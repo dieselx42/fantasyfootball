@@ -283,6 +283,39 @@ class TestWaivers(unittest.TestCase):
         free = waivers.free_agents(pool, rosters)
         self.assertEqual([p.name for p in free], ["Free Guy"])
 
+    def test_watchlist_separates_the_claimable_from_the_owned(self):
+        """The row that matters is the one that just came free."""
+        wanted = player("Stash Guy", "RB", 12)
+        blocked = player("Owned Guy", "RB", 14)
+        mine = player("WR One", "WR", 17)
+        pool = self.roster + [wanted, blocked]
+        rosters = {"me": self.roster, "rival": [blocked]}
+        watched = [
+            {"player_id": wanted.player_id, "note": "handcuff", "added": "2026-09-01"},
+            {"player_id": blocked.player_id, "note": "", "added": "2026-09-02"},
+            {"player_id": mine.player_id, "note": "", "added": "2026-09-03"},
+        ]
+        rows = waivers.resolve_watchlist(watched, pool, rosters, my_team_id="me")
+
+        self.assertEqual([r["name"] for r in rows],
+                         ["Stash Guy", "Owned Guy", "WR One"])
+        self.assertTrue(rows[0]["available"])
+        self.assertFalse(rows[1]["available"])
+        self.assertEqual(rows[1]["owner_team_id"], "rival")
+        self.assertTrue(rows[2]["mine"])
+        self.assertEqual(waivers.watchlist_alerts(rows), ["Stash Guy is a free agent — handcuff"])
+
+    def test_a_watched_player_who_leaves_the_pool_still_lists(self):
+        """A watch outlives the projection set it was made against; dropping
+        the row entirely would look like the watch was silently forgotten."""
+        rows = waivers.resolve_watchlist(
+            [{"player_id": "ghost-RB", "note": "", "added": "2026-09-01"}], [], {},
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["player"])
+        self.assertEqual(rows[0]["name"], "ghost-RB")
+        self.assertTrue(rows[0]["available"])
+
     def test_acquisition_limits_are_reported(self):
         self.cfg["waivers"]["max_acquisitions_week"] = 2
         self.assertEqual(waivers.acquisition_limits(self.cfg, added_this_week=1), [])

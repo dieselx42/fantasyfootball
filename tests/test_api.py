@@ -156,6 +156,56 @@ class InSeasonRoutes(unittest.TestCase):
         self.assertTrue(data["roster_full"])
         self.assertTrue(all(r["drop"] for r in data["recommendations"]))
 
+    # -- watchlist -------------------------------------------------------
+
+    def test_watching_a_rostered_player_reports_who_has_him(self):
+        owners = store.current_roster_ids(self.lid)
+        rival = next(t["id"] for t in self.cfg["teams"] if t["id"] != self.me)
+        theirs = owners[rival][0]
+
+        status, _ = call("POST", f"/api/league/{self.lid}/watchlist",
+                         body={"player_id": theirs, "note": "handcuff"})
+        self.assertEqual(status, 200)
+
+        _, data = call("GET", f"/api/league/{self.lid}/watchlist", "week=3")
+        row = data["watchlist"][0]
+        self.assertEqual(row["player_id"], theirs)
+        self.assertEqual(row["owner_team_id"], rival)
+        self.assertFalse(row["available"])
+        self.assertEqual(row["note"], "handcuff")
+        self.assertEqual(data["alerts"], [])
+
+    def test_a_watched_player_alerts_the_moment_he_is_dropped(self):
+        """The transition is the whole feature — rostered yesterday, free now."""
+        rival = next(t["id"] for t in self.cfg["teams"] if t["id"] != self.me)
+        theirs = store.current_roster_ids(self.lid)[rival][0]
+        call("POST", f"/api/league/{self.lid}/watchlist", body={"player_id": theirs})
+
+        _, before = call("GET", f"/api/league/{self.lid}/watchlist", "week=3")
+        self.assertFalse(before["watchlist"][0]["available"])
+
+        call("POST", f"/api/league/{self.lid}/transactions",
+             body={"type": "drop", "team_id": rival, "drops": [theirs], "week": 3})
+
+        _, after = call("GET", f"/api/league/{self.lid}/watchlist", "week=3")
+        self.assertTrue(after["watchlist"][0]["available"])
+        self.assertEqual(len(after["alerts"]), 1)
+        self.assertIn("free agent", after["alerts"][0])
+
+    def test_watching_an_unknown_player_is_a_readable_404(self):
+        status, data = call("POST", f"/api/league/{self.lid}/watchlist",
+                            body={"player_id": "nobody-WR"})
+        self.assertEqual(status, 404)
+        self.assertIn("nobody-WR", data["error"])
+
+    def test_unwatching_reports_whether_it_existed(self):
+        pid = self.pool["Lead Back"]
+        call("POST", f"/api/league/{self.lid}/watchlist", body={"player_id": pid})
+        _, first = call("DELETE", f"/api/league/{self.lid}/watchlist/{pid}")
+        self.assertTrue(first["ok"])
+        _, second = call("DELETE", f"/api/league/{self.lid}/watchlist/{pid}")
+        self.assertFalse(second["ok"])
+
     def test_waivers_report_the_faab_state_only_for_faab_leagues(self):
         _, data = call("GET", f"/api/league/{self.lid}/waivers", "week=3")
         self.assertIsNone(data["faab"])

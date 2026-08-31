@@ -107,6 +107,14 @@ CREATE TABLE IF NOT EXISTS player_status (
     status    TEXT NOT NULL,
     PRIMARY KEY (league_id, week, player_id)
 );
+
+CREATE TABLE IF NOT EXISTS watchlist (
+    league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+    player_id TEXT NOT NULL,
+    note      TEXT NOT NULL DEFAULT '',
+    added     TEXT NOT NULL,
+    PRIMARY KEY (league_id, player_id)
+);
 """
 
 _schema_lock = threading.Lock()
@@ -459,6 +467,48 @@ class PostgresBackend(Backend):
                     )
 
         self._run(op)
+
+    # -- watchlist --------------------------------------------------------
+
+    def list_watchlist(self, league_id: str) -> list[dict[str, Any]]:
+        def op(conn):
+            with self._cursor(conn) as cur:
+                cur.execute(
+                    "SELECT player_id, note, added FROM watchlist"
+                    " WHERE league_id = %s ORDER BY added, player_id",
+                    (league_id,),
+                )
+                return [dict(row) for row in cur.fetchall()]
+
+        return self._run(op)
+
+    def watch_player(self, league_id: str, player_id: str, note: str, added: str) -> None:
+        def op(conn):
+            with conn:
+                with self._cursor(conn) as cur:
+                    # Keep the original `added` so editing a note does not
+                    # make an old watch look newly added.
+                    cur.execute(
+                        "INSERT INTO watchlist (league_id, player_id, note, added)"
+                        " VALUES (%s,%s,%s,%s)"
+                        " ON CONFLICT (league_id, player_id) DO UPDATE SET"
+                        "   note = EXCLUDED.note",
+                        (league_id, player_id, note, added),
+                    )
+
+        self._run(op)
+
+    def unwatch_player(self, league_id: str, player_id: str) -> bool:
+        def op(conn):
+            with conn:
+                with self._cursor(conn) as cur:
+                    cur.execute(
+                        "DELETE FROM watchlist WHERE league_id = %s AND player_id = %s",
+                        (league_id, player_id),
+                    )
+                    return cur.rowcount > 0
+
+        return self._run(op)
 
     # -- projections ------------------------------------------------------
 

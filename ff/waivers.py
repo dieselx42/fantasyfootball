@@ -316,6 +316,71 @@ def drop_candidates(
 
 
 # --------------------------------------------------------------------------
+# Watchlist
+# --------------------------------------------------------------------------
+
+def resolve_watchlist(
+    watched: Sequence[Mapping[str, Any]],
+    pool: Iterable[Player],
+    rosters: Mapping[str, Sequence[Player]],
+    my_team_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Turn stored watches into "who has him, and can I take him".
+
+    The useful state is not the list itself but the transition: a player who
+    was on somebody's bench last week and is a free agent today. Sorting puts
+    the claimable ones first, because those are the only rows that need a
+    decision before waivers process.
+    """
+    by_id = {p.player_id: p for p in pool}
+    owner_of: dict[str, str] = {}
+    for team_id, players in rosters.items():
+        for player in players:
+            owner_of[player.player_id] = team_id
+
+    rows: list[dict[str, Any]] = []
+    for entry in watched:
+        player_id = entry.get("player_id", "")
+        player = by_id.get(player_id)
+        owner = owner_of.get(player_id)
+        rows.append(
+            {
+                "player_id": player_id,
+                # A watch outlives the projection set it was made against, so
+                # a player who has since dropped out of the pool still lists —
+                # with no detail rather than vanishing silently.
+                "player": player.to_dict() if player else None,
+                "name": player.name if player else player_id,
+                "note": entry.get("note", ""),
+                "added": entry.get("added", ""),
+                "owner_team_id": owner,
+                "available": owner is None,
+                "mine": owner is not None and owner == my_team_id,
+            }
+        )
+
+    rows.sort(
+        key=lambda r: (
+            not r["available"],                       # claimable first
+            r["mine"],                                # yours last, nothing to do
+            -((r["player"] or {}).get("season_points") or 0.0),
+        )
+    )
+    return rows
+
+
+def watchlist_alerts(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    """One line per watched player who is claimable right now."""
+    free = [r for r in rows if r["available"]]
+    if not free:
+        return []
+    return [
+        f"{r['name']} is a free agent" + (f" — {r['note']}" if r["note"] else "")
+        for r in free
+    ]
+
+
+# --------------------------------------------------------------------------
 # League rules
 # --------------------------------------------------------------------------
 

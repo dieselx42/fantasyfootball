@@ -7,6 +7,7 @@ database driver.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
 from .draft import Pick
@@ -109,6 +110,23 @@ def load_statuses(league_id: str, week: int) -> dict[str, str]:
 
 def set_status(league_id: str, week: int, player_id: str, status: str) -> None:
     get_backend().set_status(league_id, int(week), player_id, status)
+
+
+# --- watchlist -----------------------------------------------------------
+
+def list_watchlist(league_id: str) -> list[dict[str, Any]]:
+    return get_backend().list_watchlist(league_id)
+
+
+def watch_player(
+    league_id: str, player_id: str, note: str = "", added: str | None = None
+) -> None:
+    stamp = added or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    get_backend().watch_player(league_id, player_id, note or "", stamp)
+
+
+def unwatch_player(league_id: str, player_id: str) -> bool:
+    return get_backend().unwatch_player(league_id, player_id)
 
 
 # --- current rosters -----------------------------------------------------

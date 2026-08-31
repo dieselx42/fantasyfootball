@@ -156,6 +156,20 @@
         <div id="wkWaivers" class="recs"></div>
         <h3>Cheapest players to drop</h3>
         <div id="wkDrops" class="roster"></div>
+
+        <h3>Watchlist <span id="wkWatchCount" class="pill"></span></h3>
+        <p class="hint">Players you want the moment they come loose — most of
+          them are on somebody else's bench today. Anyone already claimable is
+          listed first.</p>
+        <div id="wkWatchAlerts" class="problems" hidden></div>
+        <div class="row">
+          <input id="wkWatchName" class="inp" type="text"
+                 placeholder="Add a player to watch…" list="wkWatchOptions">
+          <datalist id="wkWatchOptions"></datalist>
+          <input id="wkWatchNote" class="inp" type="text" placeholder="why (optional)">
+          <button id="wkWatchAdd" class="btn" type="button">Watch</button>
+        </div>
+        <div id="wkWatchlist" class="roster"></div>
       </div>
     </div>
   </section>

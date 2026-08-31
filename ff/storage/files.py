@@ -72,6 +72,14 @@ CREATE TABLE IF NOT EXISTS player_status (
     status    TEXT NOT NULL,
     PRIMARY KEY (league_id, week, player_id)
 );
+
+CREATE TABLE IF NOT EXISTS watchlist (
+    league_id TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    note      TEXT NOT NULL DEFAULT '',
+    added     TEXT NOT NULL,
+    PRIMARY KEY (league_id, player_id)
+);
 """
 
 
@@ -373,6 +381,47 @@ class FileBackend(Backend):
                         " (league_id, week, player_id, status) VALUES (?,?,?,?)",
                         (league_id, int(week), player_id, status),
                     )
+        finally:
+            conn.close()
+
+    # -- watchlist --------------------------------------------------------
+
+    def list_watchlist(self, league_id: str) -> list[dict[str, Any]]:
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT player_id, note, added FROM watchlist"
+                " WHERE league_id = ? ORDER BY added, player_id",
+                (league_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
+    def watch_player(self, league_id: str, player_id: str, note: str, added: str) -> None:
+        conn = self._conn()
+        try:
+            with conn:
+                # Keep the original `added` so re-watching to edit a note does
+                # not make an old watch look new.
+                conn.execute(
+                    "INSERT INTO watchlist (league_id, player_id, note, added)"
+                    " VALUES (?,?,?,?)"
+                    " ON CONFLICT (league_id, player_id) DO UPDATE SET note = excluded.note",
+                    (league_id, player_id, note, added),
+                )
+        finally:
+            conn.close()
+
+    def unwatch_player(self, league_id: str, player_id: str) -> bool:
+        conn = self._conn()
+        try:
+            with conn:
+                cur = conn.execute(
+                    "DELETE FROM watchlist WHERE league_id = ? AND player_id = ?",
+                    (league_id, player_id),
+                )
+            return cur.rowcount > 0
         finally:
             conn.close()
 

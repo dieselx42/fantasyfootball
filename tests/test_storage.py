@@ -242,6 +242,35 @@ class BackendContract:
         self.backend.set_status(cfg["id"], 3, "player-RB", "O")
         self.assertEqual(self.backend.load_statuses(cfg["id"], 3), {"player-RB": "O"})
 
+    # -- watchlist --------------------------------------------------------
+
+    def test_watchlist_round_trip_oldest_first(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        self.backend.watch_player(cfg["id"], "b-RB", "handcuff", "2026-09-02")
+        self.backend.watch_player(cfg["id"], "a-WR", "", "2026-09-01")
+        rows = self.backend.list_watchlist(cfg["id"])
+        self.assertEqual([r["player_id"] for r in rows], ["a-WR", "b-RB"])
+        self.assertEqual(rows[1]["note"], "handcuff")
+
+    def test_rewatching_updates_the_note_but_keeps_when_it_was_added(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        self.backend.watch_player(cfg["id"], "a-WR", "first", "2026-09-01")
+        self.backend.watch_player(cfg["id"], "a-WR", "second", "2026-10-30")
+        rows = self.backend.list_watchlist(cfg["id"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["note"], "second")
+        self.assertEqual(rows[0]["added"], "2026-09-01")
+
+    def test_unwatch_reports_whether_it_existed(self):
+        cfg = sample_league()
+        self.backend.save_league(cfg)
+        self.backend.watch_player(cfg["id"], "a-WR", "", "2026-09-01")
+        self.assertTrue(self.backend.unwatch_player(cfg["id"], "a-WR"))
+        self.assertFalse(self.backend.unwatch_player(cfg["id"], "a-WR"))
+        self.assertEqual(self.backend.list_watchlist(cfg["id"]), [])
+
     # -- projections ------------------------------------------------------
 
     def test_projection_round_trip(self):
