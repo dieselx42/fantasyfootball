@@ -164,12 +164,12 @@
         ]
       }
     ],
-    "bench": 6,
+    "bench": 7,
     "ir": 0
   },
   "draft": {
     "type": "snake",
-    "rounds": 15,
+    "rounds": 16,
     "seconds_per_pick": 105,
     "order": [
       "rey-del-norte",
@@ -187,7 +187,7 @@
     "scheduled_at": "2026-08-30T17:30:00-04:00",
     "timezone": "EDT",
     "arrive_minutes_early": 10,
-    "location": "Online — Yahoo (Live Standard Draft)",
+    "location": "Online \u2014 Yahoo (Live Standard Draft)",
     "notes": "Arrive 10 minutes early; the draft starts promptly at 5:45pm EDT."
   },
   "valuation": {
@@ -224,7 +224,7 @@
   "teams": [
     {
       "id": "diesel",
-      "name": "☠DIESEL☠",
+      "name": "\u2620DIESEL\u2620",
       "manager": "PHIL"
     },
     {

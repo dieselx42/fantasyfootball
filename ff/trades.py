@@ -19,7 +19,13 @@ from typing import Any, Mapping, Sequence
 
 from .config import roster_capacity
 from .players import Player
-from .roster import optimal_lineup, position_counts, unfilled_slots
+from .roster import (
+    optimal_lineup,
+    position_counts,
+    replacement_baselines,
+    starting_value,
+    unfilled_slots,
+)
 
 
 def _rules(cfg: Mapping[str, Any]) -> dict[str, Any]:
@@ -54,23 +60,19 @@ def evaluate(
     a_after = [p for p in team_a_roster if p.player_id not in a_ids] + list(b_sends)
     b_after = [p for p in team_b_roster if p.player_id not in b_ids] + list(a_sends)
 
-    # Displayed lineup totals are in projected points, because that is the
-    # number a manager recognises. The *gain* that drives the verdict is
-    # measured in VOR so an unfilled starting slot counts as replacement level
-    # rather than zero — otherwise any trade into an empty slot scores as a
-    # massive win. On full rosters the two are identical.
-    _, a_before_val = optimal_lineup(team_a_roster, cfg)
-    _, b_before_val = optimal_lineup(team_b_roster, cfg)
-    _, a_after_val = optimal_lineup(a_after, cfg)
-    _, b_after_val = optimal_lineup(b_after, cfg)
+    # One currency for both the verdict and the numbers shown beside it:
+    # projected points, with an unfilled starting slot priced at replacement
+    # level rather than zero. Scoring the verdict in VOR instead used to let a
+    # deal be called a win for a team whose displayed points fell, because the
+    # VOR-optimal FLEX is not always the points-optimal one.
+    baselines = replacement_baselines([*team_a_roster, *team_b_roster])
+    a_before_val = starting_value(team_a_roster, cfg, baselines)
+    b_before_val = starting_value(team_b_roster, cfg, baselines)
+    a_after_val = starting_value(a_after, cfg, baselines)
+    b_after_val = starting_value(b_after, cfg, baselines)
 
-    _, a_before_vor = optimal_lineup(team_a_roster, cfg, key="vor")
-    _, b_before_vor = optimal_lineup(team_b_roster, cfg, key="vor")
-    _, a_after_vor = optimal_lineup(a_after, cfg, key="vor")
-    _, b_after_vor = optimal_lineup(b_after, cfg, key="vor")
-
-    a_gain = round(a_after_vor - a_before_vor, 2)
-    b_gain = round(b_after_vor - b_before_vor, 2)
+    a_gain = round(a_after_val - a_before_val, 2)
+    b_gain = round(b_after_val - b_before_val, 2)
 
     a_out, b_out = package_value(a_sends), package_value(b_sends)
     biggest = max(abs(a_out), abs(b_out), 1.0)
@@ -229,10 +231,11 @@ def surplus_and_needs(
 ) -> tuple[dict[str, list[Player]], list[str]]:
     """Which positions a roster can afford to trade from, and which it needs.
 
-    Starters are decided on VOR, the same basis the rest of the trade engine
-    uses. Deciding them on raw points instead would call a 240-point RB a
-    starter over a 180-point WR even in a league where the WR is the more
-    valuable asset — and then look for surplus in the wrong place.
+    Starters are decided on VOR here even though ``evaluate`` scores deals in
+    points, because this asks a different question: not "who scores most this
+    week" but "who is an asset worth keeping". Deciding it on raw points would
+    call a 240-point RB a starter over a 180-point WR even in a league where
+    the WR is the scarcer asset — and then look for surplus in the wrong place.
     """
     lineup, _ = optimal_lineup(roster, cfg, key="vor")
     starters = {id(p) for group in lineup.values() for p in group}

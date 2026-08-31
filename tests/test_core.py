@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from ff import config as C
+from ff import roster as roster_mod
 from ff import trades
 from ff.draft import DraftState, build_slots, recommend
 from ff.players import Player, make_player_id, normalize_name, parse_projection_csv
@@ -189,10 +190,12 @@ class TestRealLeagueConfig(unittest.TestCase):
         self.assertEqual(score_stats({"dst_pa": 0}, self.cfg), 10.0)
         self.assertEqual(score_stats({"dst_pa": 40}, self.cfg), -4.0)
 
-    def test_roster_is_nine_starters_and_six_bench(self):
+    def test_roster_is_nine_starters_and_seven_bench(self):
+        # 16 total, confirmed against the finished 2026 draft: every team
+        # ended with 16 players over 16 rounds.
         starters = sum(s["count"] for s in self.cfg["roster"]["slots"])
         self.assertEqual(starters, 9)
-        self.assertEqual(self.cfg["roster"]["bench"], 6)
+        self.assertEqual(self.cfg["roster"]["bench"], 7)
         self.assertEqual(C.roster_capacity(self.cfg), self.cfg["draft"]["rounds"])
 
     def test_ten_teams_with_unique_ids(self):
@@ -578,6 +581,55 @@ class TestTrades(unittest.TestCase):
         )
         self.assertNotEqual(result["verdict"], "win-win")
         self.assertGreater(result["gap_pct"], self.cfg["trades"]["fairness"]["max_value_gap_pct"])
+
+    def test_verdict_never_contradicts_the_points_it_reports(self):
+        """A "win-win" must never sit on top of a side whose points fall.
+
+        The gain used to be scored in VOR while the totals beside it were in
+        points. Because positions carry different replacement levels, the
+        VOR-optimal FLEX is not always the points-optimal one, so the two
+        could disagree — and the engine happily recommended deals that made
+        the partner's projected lineup worse.
+        """
+        for deal in trades.suggest(self.cfg, self.a, {"b": self.b}, limit=50):
+            for side in ("team_a", "team_b"):
+                s = deal[side]
+                self.assertAlmostEqual(
+                    s["lineup_gain"], s["lineup_after"] - s["lineup_before"], places=2,
+                    msg=f"{side} gain disagrees with its own before/after totals",
+                )
+                self.assertGreater(
+                    s["lineup_after"], s["lineup_before"],
+                    msg=f"{side} loses points in a deal reported as {deal['verdict']}",
+                )
+
+    def test_empty_starting_slot_is_priced_at_replacement_not_zero(self):
+        """Otherwise any trade that fills a hole scores as an enormous win.
+
+        Baselines come from the rosters on both sides of the deal, which is
+        how ``evaluate`` supplies them — a position can only be priced if
+        somebody visible plays it.
+        """
+        baselines = roster_mod.replacement_baselines([*self.a, *self.b])
+        no_kicker = [p for p in self.a if p.pos != "K"]
+        full = roster_mod.starting_value(self.a, self.cfg, baselines)
+        gap = roster_mod.starting_value(no_kicker, self.cfg, baselines)
+        # A K worth 130 points sits only 10 above replacement, so losing him
+        # should cost about 10 — not the whole 130.
+        self.assertAlmostEqual(full - gap, 10.0, places=2)
+
+    def test_emptying_a_slot_costs_the_starter_s_margin_over_replacement(self):
+        """The empty-slot rule must not become a loophole. Giving away your
+        only kicker is cheap — you stream one — but it is not free, and it
+        does not cost his whole 130 points either. It costs the 10 he is
+        worth above the man you would sign to replace him.
+        """
+        k = [p for p in self.a if p.pos == "K"]
+        result = trades.evaluate(self.cfg, self.a, self.b, k, [])
+        team_a = result["team_a"]
+        self.assertAlmostEqual(
+            team_a["lineup_before"] - team_a["lineup_after"], 10.0, places=2
+        )
 
 
 if __name__ == "__main__":

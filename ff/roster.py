@@ -60,6 +60,51 @@ def lineup_value(
     return optimal_lineup(players, cfg, key)[1]
 
 
+def replacement_baselines(players: Iterable[Player]) -> dict[str, float]:
+    """Recover each position's replacement level from the VOR already stored.
+
+    ``vor`` is ``points - replacement[pos]``, so any player tells us his own
+    position's baseline. That saves threading the whole player pool through
+    callers — the trade engine, say — that only ever hold real rosters.
+    """
+    levels: dict[str, float] = {}
+    for player in players:
+        if player.pos and player.pos not in levels:
+            levels[player.pos] = round(player.points - player.vor, 4)
+    return levels
+
+
+def starting_value(
+    players: Sequence[Player],
+    cfg: Mapping[str, Any],
+    baselines: Mapping[str, float] | None = None,
+) -> float:
+    """Projected points of the best legal lineup, with any *unfilled* starting
+    slot priced at replacement level rather than zero.
+
+    Head-to-head is won on points, so points is the currency. But an empty
+    slot is not worth zero — you would stream someone into it — and scoring it
+    that way makes any deal that fills a hole look enormous.
+
+    Scoring the whole lineup in VOR also fixes that, and used to be how this
+    worked. It has a subtle cost: because positions carry different baselines,
+    the VOR-optimal FLEX is not always the points-optimal FLEX, so the lineup
+    being *scored* drifted away from the lineup being *shown*. A trade could
+    then be labelled a win for a team whose displayed points went down.
+    """
+    levels = {**(baselines or {}), **replacement_baselines(players)}
+    lineup, total = optimal_lineup(players, cfg)
+    for slot in slot_definitions(cfg):
+        missing = int(slot["count"]) - len(lineup.get(slot["slot"], []))
+        if missing <= 0:
+            continue
+        # You would sign the best free agent the slot allows, so an empty
+        # FLEX is worth the most generous of its eligible baselines.
+        eligible = [levels.get(pos, 0.0) for pos in (slot.get("eligible") or [])]
+        total += missing * (max(eligible) if eligible else 0.0)
+    return round(total, 2)
+
+
 def bench(players: Sequence[Player], cfg: Mapping[str, Any]) -> list[Player]:
     lineup, _ = optimal_lineup(players, cfg)
     starting = {id(p) for group in lineup.values() for p in group}
