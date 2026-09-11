@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -134,6 +135,82 @@ class TestAuthorizationCode(unittest.TestCase):
         adapter = get_adapter("yahoo", {"client_id": "ABC"})
         self.assertEqual(adapter.redirect_uri, Y.DEFAULT_REDIRECT_URI)
         self.assertTrue(adapter.redirect_uri.startswith("https://"))
+
+
+class TestYahooTokenLifetime(unittest.TestCase):
+    """An access token lasts an hour; a season lasts four months. Everything
+    after the first hour depends on the refresh path, which no live test can
+    reach from here — so it is pinned against a stubbed token endpoint."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        storage.set_backend(FileBackend(
+            leagues_dir=root / "leagues", projections_dir=root / "proj",
+            db_path=root / "ff.db", secrets_dir=root / "secrets",
+        ))
+        self.addCleanup(storage.reset)
+
+    def adapter(self, response):
+        self.sent = []
+
+        class Fake(Y.YahooAdapter):
+            outer = self
+
+            def credential(self, name, default=""):
+                return {"client_id": "ID", "client_secret": "SECRET"}.get(name, default)
+
+            def _token_request(self, payload):
+                Fake.outer.sent.append(payload)
+                token = dict(response)
+                token["obtained_at"] = 0
+                return token
+
+        return Fake({"league_id": "1"})
+
+    def test_a_refresh_that_omits_the_refresh_token_keeps_the_old_one(self):
+        adapter = self.adapter({"access_token": "NEW", "expires_in": 3600})
+        storage.get_backend().save_token("yahoo", {
+            "access_token": "OLD", "refresh_token": "KEEP",
+            "expires_in": 3600, "obtained_at": 0,          # already expired
+        })
+        self.assertEqual(adapter._access_token(), "NEW")
+        self.assertEqual(self.sent[0]["refresh_token"], "KEEP")
+        self.assertEqual(
+            storage.get_backend().load_token("yahoo")["refresh_token"], "KEEP",
+            "dropping this leaves the connection unrenewable an hour later",
+        )
+
+    def test_a_refresh_that_supplies_a_new_refresh_token_takes_it(self):
+        adapter = self.adapter(
+            {"access_token": "NEW", "refresh_token": "FRESH", "expires_in": 3600})
+        storage.get_backend().save_token("yahoo", {
+            "access_token": "OLD", "refresh_token": "STALE",
+            "expires_in": 3600, "obtained_at": 0,
+        })
+        adapter._access_token()
+        self.assertEqual(
+            storage.get_backend().load_token("yahoo")["refresh_token"], "FRESH")
+
+    def test_a_live_token_is_used_without_a_round_trip(self):
+        adapter = self.adapter({"access_token": "UNUSED"})
+        storage.get_backend().save_token("yahoo", {
+            "access_token": "LIVE", "refresh_token": "KEEP",
+            "expires_in": 3600, "obtained_at": int(time.time()),
+        })
+        self.assertEqual(adapter._access_token(), "LIVE")
+        self.assertEqual(self.sent, [], "a valid token must not be refreshed")
+
+    def test_a_token_with_no_access_token_is_a_readable_error(self):
+        adapter = self.adapter({"expires_in": 3600})
+        storage.get_backend().save_token("yahoo", {
+            "access_token": "OLD", "refresh_token": "KEEP",
+            "expires_in": 3600, "obtained_at": 0,
+        })
+        with self.assertRaises(Y.PlatformError) as caught:
+            adapter._access_token()
+        self.assertIn("Re-authorise", str(caught.exception))
 
 
 class TestYahooShape(unittest.TestCase):

@@ -201,14 +201,24 @@ class YahooAdapter(PlatformAdapter):
             )
         age = int(time.time()) - int(token.get("obtained_at", 0))
         if age > int(token.get("expires_in", 3600)) - 120:
-            token = self._token_request(
+            refreshed = self._token_request(
                 {
                     "grant_type": "refresh_token",
                     "redirect_uri": self.redirect_uri,
                     "refresh_token": token["refresh_token"],
                 }
             )
+            # A refresh response does not have to carry a new refresh token,
+            # and saving the response verbatim when it does not would throw
+            # the only credential that can renew this connection — the next
+            # refresh, an hour later, would fail and demand re-authorising.
+            refreshed.setdefault("refresh_token", token["refresh_token"])
+            token = refreshed
             self._save_token(token)
+        if not token.get("access_token"):
+            raise PlatformError(
+                "Yahoo returned a token with no access_token. Re-authorise."
+            )
         return token["access_token"]
 
     # -- requests ----------------------------------------------------------
