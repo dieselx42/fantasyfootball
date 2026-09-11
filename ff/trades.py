@@ -22,6 +22,7 @@ from .players import Player
 from .roster import (
     optimal_lineup,
     position_counts,
+    slot_definitions,
     replacement_baselines,
     starting_value,
     unfilled_slots,
@@ -75,8 +76,13 @@ def evaluate(
     b_gain = round(b_after_val - b_before_val, 2)
 
     a_out, b_out = package_value(a_sends), package_value(b_sends)
-    biggest = max(abs(a_out), abs(b_out), 1.0)
-    gap_pct = round(abs(a_out - b_out) / biggest * 100, 1)
+    # A package worth less than replacement is worth nothing to whoever
+    # receives it — he can have its equal off the wire for free. Letting the
+    # total go negative made the gap arithmetic produce percentages above
+    # 100%, which reads as broken rather than as "and you get nothing".
+    a_worth, b_worth = max(a_out, 0.0), max(b_out, 0.0)
+    biggest = max(a_worth, b_worth, 1.0)
+    gap_pct = round(min(abs(a_worth - b_worth) / biggest, 1.0) * 100, 1)
 
     legality = check_legality(
         cfg, a_sends, b_sends, team_a_roster, a_after, team_b_roster, b_after, week
@@ -85,6 +91,8 @@ def evaluate(
     min_gain = float(fairness.get("min_value_gain", 0.0))
 
     verdict, notes = _verdict(cfg, a_gain, b_gain, gap_pct, min_gain, legality)
+    if legality["legal"]:
+        notes.extend(last_backup_warnings(cfg, team_a_roster, a_after))
     max_gap = float(fairness.get("max_value_gap_pct", 15.0))
 
     return {
@@ -160,6 +168,42 @@ def _verdict(
         notes.append(f"Lopsided trades face a league vote ({votes} vetoes kills it).")
 
     return verdict, notes
+
+
+def last_backup_warnings(
+    cfg: Mapping[str, Any], before: Sequence[Player], after: Sequence[Player]
+) -> list[str]:
+    """Positions *this deal* would leave you starting without a backup.
+
+    The lineup gain is measured on a roster where nobody gets hurt, so a deal
+    that trades away your only spare quarterback scores exactly as well as one
+    that does not. The cost only shows up in the week it bites, too late to
+    have priced it.
+
+    Only depth the deal actually costs you is worth saying. Nobody rosters a
+    second kicker or defence, so reporting those every time would bury the one
+    line that matters under two that never change.
+    """
+    was, now = position_counts(before), position_counts(after)
+    warnings = []
+    for slot in slot_definitions(cfg):
+        eligible = slot.get("eligible") or []
+        # Only single-position slots have an unambiguous backup. A FLEX is
+        # covered by whoever is deepest across RB/WR/TE, so it is not a hole.
+        if len(eligible) != 1:
+            continue
+        pos = eligible[0]
+        have, need = now.get(pos, 0), int(slot["count"])
+        if have >= was.get(pos, 0):
+            continue                        # this deal did not cost you depth here
+        # Falling *below* the slot count never reaches here: check_legality
+        # refuses a deal that leaves a lineup unfillable, and says so more
+        # precisely. This covers the legal case — depth going to exactly none.
+        if have == need:
+            warnings.append(
+                f"Leaves you no backup at {pos} — one injury and that slot is a waiver pickup."
+            )
+    return warnings
 
 
 def check_legality(
@@ -391,16 +435,28 @@ def _packages(
 
 
 def _dedupe(results: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: set[tuple[Any, ...]] = set()
-    out = []
+    """Collapse deals that are the same deal.
+
+    Keying on the exact player lists was not enough. Swapping a throw-in
+    neither lineup starts — your QB3 for your TE2 — changes the names while
+    changing nothing about the outcome, so the board filled with pairs that
+    moved the same numbers by the same amounts and looked like padding.
+
+    Two offers with the same partner and the same gain on both sides are the
+    same decision, so only one is worth a slot. Keep the one with the
+    narrowest value gap: identical benefit, likeliest to be accepted.
+    """
+    best: dict[tuple[Any, ...], dict[str, Any]] = {}
+    order: list[tuple[Any, ...]] = []
     for result in results:
         key = (
             result.get("partner_team_id"),
-            tuple(sorted(p["player_id"] for p in result["team_a"]["sends"])),
-            tuple(sorted(p["player_id"] for p in result["team_a"]["receives"])),
+            round(result["team_a"]["lineup_gain"], 2),
+            round(result["team_b"]["lineup_gain"], 2),
         )
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(result)
-    return out
+        if key not in best:
+            best[key] = result
+            order.append(key)
+        elif result["gap_pct"] < best[key]["gap_pct"]:
+            best[key] = result
+    return [best[key] for key in order]

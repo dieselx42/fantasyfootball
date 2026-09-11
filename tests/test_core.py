@@ -616,6 +616,77 @@ class TestTrades(unittest.TestCase):
     def test_filtering_to_an_unknown_partner_returns_nothing(self):
         self.assertEqual(trades.suggest(self.cfg, self.a, {"b": self.b}, partner="ghost"), [])
 
+    def test_deals_with_the_same_outcome_take_one_slot_not_several(self):
+        """Swapping a throw-in neither lineup starts changes the names and
+        nothing else. Keyed on player lists, those looked distinct and filled
+        the board with pairs moving identical numbers."""
+        found = trades.suggest(self.cfg, self.a, {"b": self.b}, limit=40)
+        seen = [(d["partner_team_id"],
+                 round(d["team_a"]["lineup_gain"], 2),
+                 round(d["team_b"]["lineup_gain"], 2)) for d in found]
+        self.assertEqual(len(seen), len(set(seen)),
+                         "two offers with identical gains are one decision")
+
+    def test_the_kept_duplicate_is_the_one_likeliest_to_be_accepted(self):
+        wide = trades.evaluate(self.cfg, self.a, self.b,
+                               [p for p in self.a if p.name == "A WR2"],
+                               [p for p in self.b if p.name == "B WR1"])
+        found = trades.suggest(self.cfg, self.a, {"b": self.b}, limit=40)
+        for deal in found:
+            same = [d for d in found
+                    if d["team_a"]["lineup_gain"] == deal["team_a"]["lineup_gain"]]
+            self.assertEqual(len(same), 1)
+        self.assertGreater(wide["gap_pct"], 0)
+
+    def test_a_worthless_package_is_a_100_percent_gap_not_more(self):
+        """Below-replacement players have negative value, and letting a package
+        total go negative produced gaps like 110%, which reads as a broken
+        number rather than as "and you get nothing back"."""
+        junk = player("B Junk", "WR", 40, vor=-30)
+        result = trades.evaluate(
+            self.cfg, self.a, self.b + [junk],
+            [p for p in self.a if p.name == "A RB4"], [junk],
+        )
+        self.assertLessEqual(result["gap_pct"], 100.0)
+        self.assertEqual(result["gap_pct"], 100.0)
+
+    def test_a_deal_warns_when_it_strips_your_last_backup(self):
+        """Two quarterbacks down to one is legal, scores identically to any
+        other deal, and quietly makes one injury fatal. That is the case worth
+        a line; going to *zero* is refused outright by check_legality."""
+        two_qb = list(self.a) + [player("A QB2", "QB", 250, vor=20)]
+        # Team B carries exactly nine starters, so give her a spare flex body:
+        # otherwise the deal is refused for *her* lineup and proves nothing
+        # about the warning under test.
+        deep_b = list(self.b) + [player("B RB3", "RB", 120, vor=-20)]
+        result = trades.evaluate(
+            self.cfg, two_qb, deep_b,
+            [p for p in two_qb if p.name == "A QB2"],
+            [p for p in deep_b if p.name == "B WR3"],
+        )
+        self.assertTrue(result["legal"], result["violations"])
+        self.assertTrue([n for n in result["notes"] if "no backup at QB" in n])
+
+    def test_trading_your_only_quarterback_is_refused_not_merely_flagged(self):
+        result = trades.evaluate(
+            self.cfg, self.a, self.b,
+            [p for p in self.a if p.pos == "QB"],
+            [p for p in self.b if p.name == "B WR3"],
+        )
+        self.assertFalse(result["legal"])
+        self.assertEqual(result["verdict"], "illegal")
+        self.assertTrue([n for n in result["notes"] if "unable to start" in n])
+
+    def test_depth_that_was_already_thin_is_not_blamed_on_the_deal(self):
+        """Nobody rosters a second kicker. Warning about it on every trade
+        would bury the one line that matters."""
+        result = trades.evaluate(
+            self.cfg, self.a, self.b,
+            [p for p in self.a if p.name == "A RB4"],
+            [p for p in self.b if p.name == "B WR3"],
+        )
+        self.assertFalse([n for n in result["notes"] if " at K" in n or " at DST" in n])
+
     def test_verdict_never_contradicts_the_points_it_reports(self):
         """A "win-win" must never sit on top of a side whose points fall.
 
