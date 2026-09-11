@@ -93,6 +93,7 @@ def evaluate(
     verdict, notes = _verdict(cfg, a_gain, b_gain, gap_pct, min_gain, legality)
     if legality["legal"]:
         notes.extend(last_backup_warnings(cfg, team_a_roster, a_after))
+        notes.extend(bye_hole_warnings(cfg, team_a_roster, a_after))
     max_gap = float(fairness.get("max_value_gap_pct", 15.0))
 
     return {
@@ -202,6 +203,33 @@ def last_backup_warnings(
         if have == need:
             warnings.append(
                 f"Leaves you no backup at {pos} — one injury and that slot is a waiver pickup."
+            )
+    return warnings
+
+
+def bye_hole_warnings(
+    cfg: Mapping[str, Any], before: Sequence[Player], after: Sequence[Player]
+) -> list[str]:
+    """Weeks this deal would leave a starting slot with nobody to fill it.
+
+    ``check_legality`` asks whether a roster can field a lineup at all, which
+    is a season-long question. Byes make it a weekly one: trade for players
+    who share a bye with what you kept and a slot can be empty in week 8 while
+    looking perfectly stocked in the other thirteen. Season-long lineup value
+    cannot see that — the hole averages away — so a deal that guarantees a
+    zero scores like any other.
+    """
+    from .weekly import regular_season_weeks          # avoids an import cycle
+
+    warnings = []
+    for week in regular_season_weeks(cfg):
+        was = unfilled_slots([p for p in before if p.bye != week], cfg)
+        now = unfilled_slots([p for p in after if p.bye != week], cfg)
+        fresh = sorted(slot for slot, n in now.items() if n > was.get(slot, 0))
+        if fresh:
+            warnings.append(
+                f"Week {week}: leaves {' and '.join(fresh)} with nobody to start — "
+                f"everyone who can fill it is on bye."
             )
     return warnings
 

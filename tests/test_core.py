@@ -687,6 +687,34 @@ class TestTrades(unittest.TestCase):
         )
         self.assertFalse([n for n in result["notes"] if " at K" in n or " at DST" in n])
 
+    def test_a_deal_that_empties_a_slot_on_one_bye_week_says_so(self):
+        """Season-long lineup value averages a bye-week hole away. Trading for
+        players who share a bye with what you kept can leave a slot literally
+        unfillable in one week while the deal still scores as a clear win."""
+        for p in self.a:
+            if p.pos == "QB":
+                p.bye = 8
+        spare = player("A QB2", "QB", 250, vor=20)
+        spare.bye = 3                                   # covers the week 8 hole
+        roster = list(self.a) + [spare]
+        partner = list(self.b) + [player("B RB3", "RB", 120, vor=-20)]
+
+        result = trades.evaluate(
+            self.cfg, roster, partner,
+            [spare], [p for p in partner if p.name == "B WR3"],
+        )
+        self.assertTrue(result["legal"], result["violations"])
+        holes = [n for n in result["notes"] if "Week 8" in n and "QB" in n]
+        self.assertTrue(holes, f"expected a week-8 QB hole, got {result['notes']}")
+
+    def test_a_deal_that_changes_no_bye_week_stays_quiet(self):
+        result = trades.evaluate(
+            self.cfg, self.a, self.b,
+            [p for p in self.a if p.name == "A RB4"],
+            [p for p in self.b if p.name == "B WR3"],
+        )
+        self.assertFalse([n for n in result["notes"] if "nobody to start" in n])
+
     def test_verdict_never_contradicts_the_points_it_reports(self):
         """A "win-win" must never sit on top of a side whose points fall.
 
