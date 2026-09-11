@@ -234,18 +234,24 @@ class YahooAdapter(PlatformAdapter):
                 return json.loads(response.read().decode())
         except urllib.error.HTTPError as exc:
             if exc.code == 401:
-                # The token is live — status() proved that by refreshing it —
-                # so this is about what the token is *allowed* to do, not
-                # whether it exists. A token minted without a fantasy scope
-                # authorises perfectly and then 401s on every fantasy call.
+                # The token is live — getting here means it refreshed — so
+                # this is about what the token is *allowed* to do, not whether
+                # it exists. Two different causes produce an identical 401,
+                # and they have opposite fixes: re-authorising fixes the first
+                # and is pure wasted effort on the second. Naming only the
+                # scope, as this used to, sends anyone waiting on Yahoo's
+                # approval round that loop indefinitely.
                 raise PlatformError(
                     f"Yahoo rejected the request as unauthorised (401 for {path}). "
-                    f"The connection is live, so this is a permissions problem "
-                    f"rather than an expired token: the token was almost "
-                    f"certainly issued without Fantasy Sports access. "
-                    f"Re-authorise — the authorize link now asks for "
-                    f"'{self.scope}' — and if it still fails, check that your "
-                    f"Yahoo app grants Fantasy Sports read."
+                    f"The connection itself is live, so this is a permissions "
+                    f"problem rather than an expired token. Two things cause it:\n"
+                    f"  1. The token was issued without Fantasy Sports scope. "
+                    f"Re-authorise — the authorize link asks for '{self.scope}'.\n"
+                    f"  2. Yahoo has not finished provisioning Fantasy API "
+                    f"access for this app. Re-authorising cannot fix that; the "
+                    f"only fix is to wait for Yahoo.\n"
+                    f"Tell them apart on your Yahoo app page: if it does not "
+                    f"list Fantasy Sports permissions, it is the second."
                 ) from exc
             raise PlatformError(f"Yahoo returned HTTP {exc.code} for {path}") from exc
         except (urllib.error.URLError, OSError) as exc:

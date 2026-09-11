@@ -131,6 +131,30 @@ class TestAuthorizationCode(unittest.TestCase):
         adapter = get_adapter("yahoo", {"client_id": "ABC", "scope": "fspt-w"})
         self.assertIn("scope=fspt-w", adapter.authorize_url())
 
+    def test_a_401_names_both_causes_not_just_the_scope(self):
+        """A missing scope and un-provisioned API access give an identical
+        401 with opposite fixes. Blaming the scope alone sends anyone still
+        waiting on Yahoo's approval round a re-authorise loop forever."""
+        import urllib.error
+        from unittest import mock
+
+        class Connected(Y.YahooAdapter):
+            def _access_token(self):
+                return "LIVE"
+
+        adapter = Connected({"league_id": "1"})
+        unauthorized = urllib.error.HTTPError(
+            "https://example.invalid", 401, "Unauthorized", {}, None)
+
+        with mock.patch.object(Y.urllib.request, "urlopen", side_effect=unauthorized):
+            with self.assertRaises(Y.PlatformError) as caught:
+                adapter._get("/league/1/settings")
+
+        message = str(caught.exception)
+        self.assertIn("fspt-r", message, "must still name the scope fix")
+        self.assertIn("provisioning", message, "must name the waiting-on-Yahoo cause")
+        self.assertIn("cannot fix that", message, "must say re-authorising is futile")
+
     def test_the_default_redirect_uri_is_one_yahoo_will_accept(self):
         adapter = get_adapter("yahoo", {"client_id": "ABC"})
         self.assertEqual(adapter.redirect_uri, Y.DEFAULT_REDIRECT_URI)
