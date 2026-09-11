@@ -707,6 +707,41 @@ class TestTrades(unittest.TestCase):
         holes = [n for n in result["notes"] if "Week 8" in n and "QB" in n]
         self.assertTrue(holes, f"expected a week-8 QB hole, got {result['notes']}")
 
+    def test_a_deal_that_costs_a_starting_slot_ranks_below_clean_ones(self):
+        """The engine used to print "leaves QB with nobody to start in week 8"
+        and rank that offer top anyway, because only the season-long gain
+        reached the sort. Flagging a deal as damaging and then recommending it
+        first is the list arguing with itself."""
+        found = trades.suggest(self.cfg, self.a, {"b": self.b}, limit=40)
+        flagged = [i for i, d in enumerate(found) if d["structural_risk"]]
+        clean = [i for i, d in enumerate(found) if not d["structural_risk"]]
+        if flagged and clean:
+            self.assertLess(max(clean), min(flagged),
+                            "a deal that costs you a slot cannot outrank a clean one")
+
+    def test_concerns_are_reported_separately_from_the_verdict_notes(self):
+        two_qb = list(self.a) + [player("A QB2", "QB", 250, vor=20)]
+        deep_b = list(self.b) + [player("B RB3", "RB", 120, vor=-20)]
+        result = trades.evaluate(
+            self.cfg, two_qb, deep_b,
+            [p for p in two_qb if p.name == "A QB2"],
+            [p for p in deep_b if p.name == "B WR3"],
+        )
+        self.assertTrue(result["structural_risk"])
+        self.assertTrue(result["concerns"])
+        # Everything in concerns is also shown to the reader.
+        for line in result["concerns"]:
+            self.assertIn(line, result["notes"])
+
+    def test_a_clean_deal_carries_no_concerns(self):
+        result = trades.evaluate(
+            self.cfg, self.a, self.b,
+            [p for p in self.a if p.name == "A RB4"],
+            [p for p in self.b if p.name == "B WR3"],
+        )
+        self.assertEqual(result["concerns"], [])
+        self.assertFalse(result["structural_risk"])
+
     def test_a_deal_that_changes_no_bye_week_stays_quiet(self):
         result = trades.evaluate(
             self.cfg, self.a, self.b,

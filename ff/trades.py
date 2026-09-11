@@ -91,9 +91,11 @@ def evaluate(
     min_gain = float(fairness.get("min_value_gain", 0.0))
 
     verdict, notes = _verdict(cfg, a_gain, b_gain, gap_pct, min_gain, legality)
+    concerns: list[str] = []
     if legality["legal"]:
-        notes.extend(last_backup_warnings(cfg, team_a_roster, a_after))
-        notes.extend(bye_hole_warnings(cfg, team_a_roster, a_after))
+        concerns = (last_backup_warnings(cfg, team_a_roster, a_after)
+                    + bye_hole_warnings(cfg, team_a_roster, a_after))
+        notes.extend(concerns)
     max_gap = float(fairness.get("max_value_gap_pct", 15.0))
 
     return {
@@ -101,6 +103,11 @@ def evaluate(
         "violations": legality["violations"],
         "verdict": verdict,
         "notes": notes,
+        # What the deal costs you that the gain cannot see: depth it strips,
+        # and weeks it leaves a slot unfillable. Reported separately so the
+        # ranking can act on it rather than only printing it underneath.
+        "concerns": concerns,
+        "structural_risk": bool(concerns),
         "gap_pct": gap_pct,
         # Legal, but lopsided enough that your league's own guideline says it
         # may draw a veto. Worth knowing before you send the offer.
@@ -397,10 +404,16 @@ def suggest(
                 results.append(result)
 
     # Deals that would survive a veto vote come first — a bigger gain you can
-    # never get approved is worth less than a smaller one you can.
+    # never get approved is worth less than a smaller one you can. Deals that
+    # cost you a starting slot follow the same logic and used not to: the
+    # engine printed "leaves QB with nobody to start in week 8" and then
+    # ranked that offer top, because only the season-long gain reached the
+    # sort. A gain measured over a roster that cannot field a lineup in some
+    # week is overstated by exactly the week it breaks.
     results.sort(
         key=lambda r: (
             not r["veto_risk"],
+            not r["structural_risk"],
             r["team_a"]["lineup_gain"],
             r["combined_gain"],
         ),
