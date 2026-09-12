@@ -83,7 +83,44 @@ function setView(view) {
  * Boot
  * ------------------------------------------------------------------ */
 
+/* Yahoo sends the browser back with ?code=… after you approve the app. It can
+ * land here or on /callback.html depending which Redirect URI is registered,
+ * so both finish the job. The code is single-use and expires quickly, which is
+ * why it is exchanged on arrival rather than shown for copying.
+ *
+ * The redirect_uri sent with the exchange has to be byte-identical to the one
+ * the code was issued against. Deriving it from the address we actually landed
+ * on is the only way to be sure, so a trailing slash or a different path costs
+ * nothing. */
+async function finishYahooRedirect() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get('code');
+  if (!code && !params.get('error')) return;
+
+  const clean = () => history.replaceState({}, '', location.origin + location.pathname);
+
+  if (params.get('error')) {
+    toast(`Yahoo declined: ${params.get('error_description') || params.get('error')}`, true);
+    clean();
+    return;
+  }
+  try {
+    await api('/api/yahoo/exchange', {
+      method: 'POST',
+      body: { settings: { redirect_uri: location.origin + location.pathname }, code },
+    });
+    toast('Connected to Yahoo.');
+  } catch (err) {
+    toast(`Could not finish connecting: ${err.message}`, true);
+  }
+  // Always clear it: a spent code left in the address bar gets re-sent on
+  // every refresh and fails every time, which reads as the connection
+  // breaking rather than as the code being used up.
+  clean();
+}
+
 async function boot() {
+  await finishYahooRedirect();
   State.boot = await api('/api/bootstrap');
 
   const picker = $('#leaguePicker');
@@ -221,11 +258,12 @@ function viewSetup() {
   renderPlatforms();
   renderFields();
 
-  // Where Yahoo should send the browser back to. /callback.html exchanges the
-  // code on arrival, so there is nothing to copy — but it only works if this
-  // exact URL is also registered on the Yahoo app form, so the manual paste
-  // below stays as the fallback for anyone who has not added it.
-  const callbackUrl = () => location.origin + '/callback.html';
+  // Where Yahoo should send the browser back to. Either the site root or
+  // /callback.html finishes the exchange on arrival, so there is nothing to
+  // copy — but Yahoo matches Redirect URIs exactly, so whichever we ask for
+  // has to be registered on the app form. Default to the root: it is the one
+  // people add first, and it is what a bare domain paste produces.
+  const callbackUrl = () => location.origin + '/';
   const callbackLabel = $('#yahooCallbackUrl');
   if (callbackLabel) callbackLabel.textContent = callbackUrl();
 
