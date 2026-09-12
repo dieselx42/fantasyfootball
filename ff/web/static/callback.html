@@ -1,0 +1,75 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Connecting to Yahoo…</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  .cb { max-width: 34rem; margin: 4rem auto; padding: 0 1rem; }
+  .cb h1 { margin-bottom: .25rem; }
+  .cb pre { white-space: pre-wrap; }
+</style>
+
+<section class="cb stack">
+  <h1 id="cbTitle">Connecting to Yahoo…</h1>
+  <p id="cbDetail" class="lede">Exchanging the authorisation code for a token.</p>
+  <div id="cbProblem" class="problems" hidden></div>
+  <p><a class="btn" href="/">Back to the app</a></p>
+</section>
+
+<script>
+// Yahoo sends the browser here after you approve the app. The code in the
+// query string is short-lived and single-use, so it is exchanged immediately
+// rather than shown for copying - that copy-paste step was only ever a
+// workaround for having nowhere to land.
+(async () => {
+  const title = document.getElementById('cbTitle');
+  const detail = document.getElementById('cbDetail');
+  const problem = document.getElementById('cbProblem');
+
+  const fail = (heading, message) => {
+    title.textContent = heading;
+    detail.textContent = '';
+    problem.hidden = false;
+    problem.textContent = message;
+  };
+
+  const params = new URLSearchParams(location.search);
+
+  // Yahoo reports a refusal in the query string rather than by failing.
+  if (params.get('error')) {
+    fail('Yahoo declined the request',
+         `${params.get('error')}: ${params.get('error_description') || 'no detail given'}`);
+    return;
+  }
+
+  const code = params.get('code');
+  if (!code) {
+    fail('Nothing to exchange',
+         'This page is where Yahoo sends you after you approve the app. ' +
+         'Opening it directly does nothing - start from Connect to Yahoo.');
+    return;
+  }
+
+  // The redirect_uri sent now must be byte-identical to the one that was sent
+  // when the code was issued, or Yahoo rejects the exchange. Deriving it from
+  // this page's own address is the only way to guarantee that.
+  const redirect_uri = location.origin + location.pathname;
+
+  try {
+    const response = await fetch('/api/yahoo/exchange', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: { redirect_uri }, code }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+
+    title.textContent = 'Connected to Yahoo';
+    detail.textContent = data.expires_in
+      ? `Token stored. It expires in ${Math.round(data.expires_in / 60)} minutes and ` +
+        `refreshes itself from here on.`
+      : 'Token stored.';
+  } catch (err) {
+    fail('Could not finish connecting', err.message);
+  }
+})();
+</script>

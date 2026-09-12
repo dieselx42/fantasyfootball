@@ -42,14 +42,25 @@
         <div id="yahooAuth" class="yahoo-auth" hidden>
           <p class="hint">Yahoo needs a free developer app. Create one at
             <a href="https://developer.yahoo.com/apps/" target="_blank" rel="noreferrer">developer.yahoo.com/apps</a>
-            with redirect URI <code>oob</code> and Fantasy Sports read access.</p>
+            as a <b>Confidential Client</b>, and give it Fantasy Sports read
+            access under API Permissions. Yahoo has to approve that separately
+            — until it is listed there, every call answers 401.</p>
+          <label class="check">
+            <input id="yahooUseCallback" type="checkbox">
+            Send me straight back here after approving
+          </label>
+          <p class="hint">Only works if <code id="yahooCallbackUrl"></code> is one
+            of the Redirect URIs on the Yahoo app form. Otherwise leave this off
+            and paste the code by hand.</p>
           <button id="btnAuthUrl" class="btn ghost" type="button">Get authorization link</button>
           <div id="authUrlBox" hidden>
             <a id="authUrl" target="_blank" rel="noreferrer" class="authlink"></a>
-            <label>Paste the code Yahoo shows you
-              <input id="yahooCode" type="text" placeholder="Authorization code">
-            </label>
-            <button id="btnExchange" class="btn" type="button">Connect</button>
+            <div id="yahooManual">
+              <label>Paste the code Yahoo sends you to — the whole URL is fine
+                <input id="yahooCode" type="text" placeholder="Authorization code">
+              </label>
+              <button id="btnExchange" class="btn" type="button">Connect</button>
+            </div>
           </div>
         </div>
       </li>

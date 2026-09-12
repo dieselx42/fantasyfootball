@@ -221,12 +221,25 @@ function viewSetup() {
   renderPlatforms();
   renderFields();
 
+  // Where Yahoo should send the browser back to. /callback.html exchanges the
+  // code on arrival, so there is nothing to copy — but it only works if this
+  // exact URL is also registered on the Yahoo app form, so the manual paste
+  // below stays as the fallback for anyone who has not added it.
+  const callbackUrl = () => location.origin + '/callback.html';
+  const callbackLabel = $('#yahooCallbackUrl');
+  if (callbackLabel) callbackLabel.textContent = callbackUrl();
+
   $('#btnAuthUrl').onclick = async () => {
     try {
-      const { url } = await api('/api/yahoo/authorize-url', { method: 'POST', body: { settings } });
+      const useCallback = $('#yahooUseCallback')?.checked;
+      const body = { settings: useCallback
+        ? { ...settings, redirect_uri: callbackUrl() }
+        : settings };
+      const { url } = await api('/api/yahoo/authorize-url', { method: 'POST', body });
       $('#authUrl').href = url;
       $('#authUrl').textContent = url;
       $('#authUrlBox').hidden = false;
+      $('#yahooManual').hidden = !!useCallback;
     } catch (err) { toast(err.message, true); }
   };
 
