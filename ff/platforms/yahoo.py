@@ -37,7 +37,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Mapping
 
 from ..players import Player, make_player_id, normalize_pos, normalize_team
 from .base import PlatformAdapter, PlatformError
@@ -151,6 +152,11 @@ class YahooAdapter(PlatformAdapter):
                 "code": extract_code(code),
             }
         )
+        # Stamped once, here, and carried through every later refresh, so the
+        # age of the *grant* stays visible. obtained_at is rewritten hourly and
+        # cannot answer "was this authorised before we asked for fspt-r?".
+        token["authorized_at"] = token["obtained_at"]
+        token["scope"] = self.scope
         self._save_token(token)
         return {"ok": True, "expires_in": token.get("expires_in")}
 
@@ -213,6 +219,11 @@ class YahooAdapter(PlatformAdapter):
             # the only credential that can renew this connection — the next
             # refresh, an hour later, would fail and demand re-authorising.
             refreshed.setdefault("refresh_token", token["refresh_token"])
+            # Carry the grant's own age and scope across the refresh; a new
+            # access token does not make an old authorisation new.
+            for key in ("authorized_at", "scope"):
+                if token.get(key) is not None:
+                    refreshed.setdefault(key, token[key])
             token = refreshed
             self._save_token(token)
         if not token.get("access_token"):
@@ -261,14 +272,39 @@ class YahooAdapter(PlatformAdapter):
         if not self.credential("client_id"):
             return {"kind": self.kind, "ready": False,
                     "detail": "Add your Yahoo Client ID and Secret."}
-        if not self._load_token():
+        token = self._load_token()
+        if not token:
             return {"kind": self.kind, "ready": False,
                     "detail": "Authorize the app to finish connecting."}
         try:
             self._access_token()
         except PlatformError as exc:
             return {"kind": self.kind, "ready": False, "detail": str(exc)}
-        return {"kind": self.kind, "ready": True, "detail": "Connected."}
+        # When the token was first minted, not when it last refreshed. A 401 on
+        # every fantasy endpoint has two causes that look identical, and one of
+        # them is "this token predates you asking for the fantasy scope". That
+        # is only answerable if we say how old the grant is.
+        return {
+            "kind": self.kind,
+            "ready": True,
+            "detail": "Connected.",
+            "authorized_at": self._authorized_at(token),
+            "scope_requested": self.scope,
+        }
+
+    def _authorized_at(self, token: Mapping[str, Any]) -> str:
+        """ISO timestamp of the original authorisation, as best we can tell.
+
+        ``obtained_at`` is rewritten on every refresh, so it dates the latest
+        access token rather than the grant. ``authorized_at`` is stamped once
+        and carried forward, so an older token that has merely been refreshed
+        still reports when you actually approved the app.
+        """
+        stamp = token.get("authorized_at") or token.get("obtained_at")
+        try:
+            return datetime.fromtimestamp(int(stamp), timezone.utc).isoformat()
+        except (TypeError, ValueError):
+            return "unknown"
 
     # -- data --------------------------------------------------------------
 

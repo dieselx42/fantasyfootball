@@ -226,6 +226,31 @@ class TestYahooTokenLifetime(unittest.TestCase):
         self.assertEqual(adapter._access_token(), "LIVE")
         self.assertEqual(self.sent, [], "a valid token must not be refreshed")
 
+    def test_a_refresh_does_not_make_an_old_authorisation_look_new(self):
+        """A 401 on every fantasy endpoint has two causes that look alike, and
+        one is "this grant predates asking for fspt-r". obtained_at is rewritten
+        hourly, so only a stamp that survives refreshes can answer it."""
+        adapter = self.adapter({"access_token": "NEW", "expires_in": 3600})
+        storage.get_backend().save_token("yahoo", {
+            "access_token": "OLD", "refresh_token": "KEEP", "expires_in": 3600,
+            "obtained_at": 0, "authorized_at": 1_600_000_000, "scope": "fspt-r",
+        })
+        adapter._access_token()
+        saved = storage.get_backend().load_token("yahoo")
+        self.assertEqual(saved["authorized_at"], 1_600_000_000)
+        self.assertEqual(saved["scope"], "fspt-r")
+
+    def test_status_reports_when_the_grant_was_made(self):
+        adapter = self.adapter({"access_token": "LIVE", "expires_in": 3600})
+        storage.get_backend().save_token("yahoo", {
+            "access_token": "LIVE", "refresh_token": "KEEP", "expires_in": 3600,
+            "obtained_at": int(time.time()), "authorized_at": 1_600_000_000,
+        })
+        state = adapter.status()
+        self.assertTrue(state["ready"])
+        self.assertTrue(state["authorized_at"].startswith("2020-09-"))
+        self.assertEqual(state["scope_requested"], "fspt-r")
+
     def test_a_token_with_no_access_token_is_a_readable_error(self):
         adapter = self.adapter({"expires_in": 3600})
         storage.get_backend().save_token("yahoo", {
