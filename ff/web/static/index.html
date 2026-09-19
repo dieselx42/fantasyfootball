@@ -292,18 +292,26 @@
         league file — league files are meant to be committed and shared.</p>
       <div id="connFields" class="fields"></div>
       <div id="connAuth" class="yahoo-auth" hidden>
-        <p class="hint">Approve on Yahoo's own site. Your password never comes
-          here. Yahoo then sends your browser to your Redirect URI with
-          <code>?code=…</code> on the end — the page will fail to load because
-          nothing is listening there, which is expected. Copy the code out of
-          the address bar and paste it below.</p>
+        <p class="hint">Approve on Yahoo's own site — your password never comes
+          here. Fantasy Sports must be ticked under <b>API Permissions</b> on
+          the Yahoo app itself, and an app created before that permission
+          existed cannot gain it; a new app is the only fix.</p>
+        <label class="check">
+          <input id="connUseCallback" type="checkbox" checked>
+          Send me straight back here after approving
+        </label>
+        <p class="hint">Needs <code id="connCallbackUrl"></code> listed as a
+          Redirect URI on the Yahoo app. Untick to paste the code by hand
+          instead.</p>
         <button id="btnConnAuthUrl" class="btn ghost" type="button">Get authorization link</button>
         <div id="connAuthBox" hidden>
           <a id="connAuthUrl" target="_blank" rel="noreferrer" class="authlink"></a>
-          <label>Paste the code from the address bar
-            <input id="connCode" type="text" placeholder="code=… (everything after the =)">
-          </label>
-          <button id="btnConnExchange" class="btn primary" type="button">Connect</button>
+          <div id="connManual">
+            <label>Paste the code from the address bar
+              <input id="connCode" type="text" placeholder="code=… (everything after the =)">
+            </label>
+            <button id="btnConnExchange" class="btn primary" type="button">Connect</button>
+          </div>
         </div>
       </div>
     </div>

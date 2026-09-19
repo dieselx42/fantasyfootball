@@ -1150,14 +1150,26 @@ function renderConnectionPanel(league) {
       : null)));
 
   $('#connAuth').hidden = kind !== 'yahoo';
+  const connCb = $('#connCallbackUrl');
+  if (connCb) connCb.textContent = location.origin + '/';
 
   $('#btnConnAuthUrl').onclick = async () => {
+    // Credentials have to be stored before Yahoo sends the browser away: the
+    // code comes back to a fresh page load with none of this form's state, and
+    // the exchange needs the client id and secret to complete.
+    try {
+      await api(`/api/league/${league.id}`, { method: 'PUT', body: { league } });
+    } catch (err) { toast(err.message, true); return; }
+
+    const useCallback = $('#connUseCallback')?.checked;
+    if (useCallback) settings.redirect_uri = location.origin + '/';
     try {
       const { url } = await api('/api/yahoo/authorize-url',
         { method: 'POST', body: { settings } });
       $('#connAuthUrl').href = url;
       $('#connAuthUrl').textContent = url;
       $('#connAuthBox').hidden = false;
+      $('#connManual').hidden = !!useCallback;
     } catch (err) { toast(err.message, true); }
   };
 
