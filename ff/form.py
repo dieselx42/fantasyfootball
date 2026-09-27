@@ -46,6 +46,7 @@ def per_game_projection(
     actuals: Sequence[float],
     season_games: float = 17.0,
     prior_games: float = PRIOR_GAMES,
+    replacement: float = 0.0,
 ) -> float:
     """One week's expectation, preseason pace updated by games played.
 
@@ -53,8 +54,18 @@ def per_game_projection(
     he missed are not passed in: a projection answers "what if he plays", and
     availability is a separate question the lineup already asks through byes
     and injury status.
+
+    ``replacement`` is the per-week prior for a player the preseason file
+    never listed. It matters more than it looks: anyone who broke out after
+    the file was built has no projection, and treating that as a *zero* prior
+    buries him under players the file happened to include. A kicker with 4 and
+    14 on the board came out at 3.00 that way. Replacement level is what an
+    unlisted player is actually worth before you have seen him play, so that
+    is what the blend should regress him towards.
     """
     pace = player.points / season_games if season_games else 0.0
+    if pace <= 0:
+        pace = max(replacement, 0.0)
     if not actuals:
         return round(pace, 2)
     form = sum(actuals) / len(actuals)
@@ -67,17 +78,24 @@ def project_roster(
     actuals: Mapping[str, Sequence[float]],
     season_games: float = 17.0,
     prior_games: float = PRIOR_GAMES,
+    replacement: Mapping[str, float] | None = None,
 ) -> list[Player]:
     """Copies of ``players`` with ``points`` set to this week's expectation.
+
+    ``replacement`` maps position to a *season* replacement level, the same
+    shape ``valuation.replacement_levels`` returns; it is divided down here so
+    callers do not have to remember which scale it is in.
 
     The season total moves to ``season_points`` so nothing downstream loses
     it — the trade engine and draft board both still want the full-season
     number, and only start/sit wants the weekly one.
     """
+    levels = replacement or {}
     out = []
     for player in players:
+        floor = levels.get(player.pos, 0.0) / season_games if season_games else 0.0
         weekly = per_game_projection(
-            player, actuals.get(player.player_id, ()), season_games, prior_games
+            player, actuals.get(player.player_id, ()), season_games, prior_games, floor
         )
         clone = Player(**{**player.__dict__})
         clone.season_points = player.points

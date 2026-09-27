@@ -342,6 +342,35 @@ class TestWaivers(unittest.TestCase):
         self.assertLess(after, 15.0, "one game cannot carry a projection")
         self.assertGreater(after, 8.0, "but it has to count for something")
 
+    def test_a_player_the_preseason_file_never_listed_falls_back_to_replacement(self):
+        """Anyone who broke out after the file was built has no projection.
+        Treating that as a zero prior buried a kicker with 4 and 14 on the
+        board at 3.00 — below players the file merely happened to include."""
+        from ff import form
+
+        unlisted = player("Waiver Kicker", "K", 0)
+        blind = form.per_game_projection(unlisted, [4.0, 14.0])
+        floored = form.per_game_projection(unlisted, [4.0, 14.0], replacement=6.0)
+        self.assertLess(blind, 4.0, "the old behaviour, kept honest by this test")
+        self.assertGreater(floored, blind)
+        self.assertGreater(floored, 6.0, "two good games must beat replacement")
+
+    def test_replacement_only_applies_when_there_is_no_projection(self):
+        from ff import form
+
+        listed = player("Drafted Kicker", "K", 170)          # 10.0 a week
+        with_floor = form.per_game_projection(listed, [], replacement=6.0)
+        self.assertAlmostEqual(with_floor, 10.0, places=2)
+
+    def test_project_roster_divides_season_replacement_down_to_one_week(self):
+        from ff import form
+
+        unlisted = player("Waiver Kicker", "K", 0)
+        out = form.project_roster(
+            [unlisted], {unlisted.player_id: []}, replacement={"K": 102.0},
+        )
+        self.assertAlmostEqual(out[0].points, 6.0, places=2)
+
     def test_the_weight_on_form_grows_with_games_played(self):
         from ff import form
 
