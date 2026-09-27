@@ -316,6 +316,53 @@ class TestWaivers(unittest.TestCase):
         self.assertEqual(rows[0]["name"], "ghost-RB")
         self.assertTrue(rows[0]["available"])
 
+    def test_form_starts_at_the_projection_and_moves_towards_reality(self):
+        """A season projection is the best guess in August and the worst one in
+        November. Two good games are not a new projection either."""
+        from ff import form
+
+        p = player("Rookie TE", "TE", 170)          # 10.0 a week on pace
+        self.assertAlmostEqual(form.per_game_projection(p, []), 10.0, places=2)
+
+        # Nothing in two games: the number should fall, but not to zero.
+        two = form.per_game_projection(p, [0.0, 1.0])
+        self.assertLess(two, 10.0)
+        self.assertGreater(two, 5.0)
+
+        # Same average over six games is far more convincing.
+        six = form.per_game_projection(p, [0.0, 1.0, 0.5, 1.0, 0.5, 0.5])
+        self.assertLess(six, two)
+
+    def test_one_huge_game_does_not_become_the_projection(self):
+        """Chasing last week's points is the classic way to lose this week's."""
+        from ff import form
+
+        p = player("Flier WR", "WR", 136)           # 8.0 a week on pace
+        after = form.per_game_projection(p, [30.0])
+        self.assertLess(after, 15.0, "one game cannot carry a projection")
+        self.assertGreater(after, 8.0, "but it has to count for something")
+
+    def test_the_weight_on_form_grows_with_games_played(self):
+        from ff import form
+
+        weights = [form.form_weight(n) for n in range(0, 9)]
+        self.assertEqual(weights[0], 0.0)
+        self.assertEqual(weights, sorted(weights))
+        self.assertLess(weights[-1], 1.0, "the prior never disappears entirely")
+        self.assertAlmostEqual(form.form_weight(4), 0.5, places=6)
+
+    def test_projecting_a_roster_keeps_the_season_number(self):
+        """Start/sit wants this week; the trade engine and draft board still
+        want the full season, so moving one must not destroy the other."""
+        from ff import form
+
+        p = player("Someone", "RB", 170)
+        out = form.project_roster([p], {p.player_id: [20.0, 20.0]})
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].season_points, 170)
+        self.assertGreater(out[0].points, 10.0)
+        self.assertEqual(p.points, 170, "the original must not be mutated")
+
     def test_acquisition_limits_are_reported(self):
         self.cfg["waivers"]["max_acquisitions_week"] = 2
         self.assertEqual(waivers.acquisition_limits(self.cfg, added_this_week=1), [])
