@@ -656,6 +656,11 @@ def saved_trades(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any
 # happened, and watch what the other nine managers are doing about it.
 # --------------------------------------------------------------------------
 
+def _scores(cfg: dict[str, Any]) -> dict[int, dict[str, float]]:
+    """Every final score we know: the league file's, plus anything entered."""
+    return matchups.recorded_scores(cfg, store.load_scores(cfg["id"]))
+
+
 def _week_arg(api: Api, cfg: dict[str, Any], params: dict[str, str]) -> int:
     """The week under discussion, defaulting to the next unscored one."""
     raw = params.get("week") or api.arg("week")
@@ -664,7 +669,7 @@ def _week_arg(api: Api, cfg: dict[str, Any], params: dict[str, str]) -> int:
             return int(raw)
         except ValueError as exc:
             raise ApiError(f"'{raw}' is not a week number.") from exc
-    return matchups.default_week(cfg, store.load_scores(cfg["id"]))
+    return matchups.default_week(cfg, _scores(cfg))
 
 
 def _weekly_view(cfg: dict[str, Any], week: int) -> tuple[list[Player], dict[str, list[Player]]]:
@@ -689,7 +694,7 @@ def get_week(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
 
     projections = matchups.project_week(cfg, week, rosters)
     summary = matchups.week_summary(
-        cfg, week, store.load_scores(cfg["id"]), projections, team_id
+        cfg, week, _scores(cfg), projections, team_id
     )
 
     return {
@@ -806,7 +811,7 @@ def get_scoreboard(api: Api, params: dict[str, str], _body: dict[str, Any]) -> A
     cfg = api.load_cfg(params["league_id"])
     week = _week_arg(api, cfg, params)
     _pool, rosters = _weekly_view(cfg, week)
-    scores = store.load_scores(cfg["id"])
+    scores = _scores(cfg)
     summary = matchups.week_summary(
         cfg, week, scores, matchups.project_week(cfg, week, rosters)
     )
@@ -845,7 +850,7 @@ def record_scores(api: Api, params: dict[str, str], body: dict[str, Any]) -> Any
 @route("GET", "/api/league/<league_id>/standings")
 def get_standings(api: Api, params: dict[str, str], _body: dict[str, Any]) -> Any:
     cfg = api.load_cfg(params["league_id"])
-    summary = matchups.season_summary(cfg, store.load_scores(cfg["id"]))
+    summary = matchups.season_summary(cfg, _scores(cfg))
     summary["teams"] = cfg.get("teams", [])
     return summary
 

@@ -549,6 +549,57 @@ class TestResults(unittest.TestCase):
         self.assertEqual(summary["my_game"]["my_projected"], 38.0)
 
 
+class TestRecordedScores(unittest.TestCase):
+    """Results live in the league file; the store is an overlay on top."""
+
+    def setUp(self):
+        self.cfg = league(4)
+        self.a, self.b, self.c, self.d = [t["id"] for t in self.cfg["teams"]]
+        self.cfg["schedule"] = [
+            {"week": 1, "games": [{"home": self.a, "away": self.b},
+                                  {"home": self.c, "away": self.d}]},
+        ]
+        self.cfg["results"] = [
+            {"week": 1, "scores": {self.a: 120.0, self.b: 100.0}},
+        ]
+
+    def test_the_config_alone_is_enough(self):
+        self.assertEqual(
+            matchups.recorded_scores(self.cfg, {}),
+            {1: {self.a: 120.0, self.b: 100.0}},
+        )
+
+    def test_the_store_overrides_the_config(self):
+        got = matchups.recorded_scores(self.cfg, {1: {self.a: 130.0}})
+        self.assertEqual(got[1][self.a], 130.0)
+        self.assertEqual(got[1][self.b], 100.0)   # untouched, not wiped
+
+    def test_a_week_only_the_store_knows_still_counts(self):
+        got = matchups.recorded_scores(self.cfg, {2: {self.c: 90.0}})
+        self.assertEqual(sorted(got), [1, 2])
+
+    def test_unknown_teams_and_junk_are_dropped(self):
+        self.cfg["results"] = [
+            {"week": 1, "scores": {"ghost": 200.0, self.a: "not a score"}},
+            {"week": "later", "scores": {self.b: 50.0}},
+        ]
+        self.assertEqual(matchups.recorded_scores(self.cfg, {}), {})
+
+    def test_a_league_with_no_results_block_is_unaffected(self):
+        self.cfg.pop("results")
+        self.assertEqual(matchups.recorded_scores(self.cfg, {}), {})
+        self.assertEqual(
+            matchups.recorded_scores(self.cfg, {1: {self.a: 11.0}}),
+            {1: {self.a: 11.0}},
+        )
+
+    def test_standings_read_the_config_results(self):
+        rows = {r["team_id"]: r
+                for r in matchups.standings(self.cfg, matchups.recorded_scores(self.cfg))}
+        self.assertEqual(rows[self.a]["record"], "1-0")
+        self.assertEqual(rows[self.b]["record"], "0-1")
+
+
 # --------------------------------------------------------------------------
 # Transactions
 # --------------------------------------------------------------------------

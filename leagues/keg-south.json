@@ -652,5 +652,52 @@
         }
       ]
     }
+  ],
+  "results": [
+    {
+      "week": 1,
+      "scores": {
+        "diesel": 80.33,
+        "ruly-s-big-tymers": 100.58,
+        "baker-s-dirty-dozen": 73.45,
+        "double-taylor-gators": 82.32,
+        "code-brown": 77.08,
+        "g-o-a-t-6x-champ": 110.06,
+        "dracarys": 113.48,
+        "the-killer-ps": 88.9,
+        "rey-del-norte": 132.83,
+        "eat-meat": 187.03
+      }
+    },
+    {
+      "week": 2,
+      "scores": {
+        "diesel": 85.04,
+        "baker-s-dirty-dozen": 116.83,
+        "code-brown": 86.09,
+        "eat-meat": 108.66,
+        "double-taylor-gators": 136.29,
+        "dracarys": 89.72,
+        "g-o-a-t-6x-champ": 98.31,
+        "the-killer-ps": 102.69,
+        "rey-del-norte": 92.4,
+        "ruly-s-big-tymers": 134.11
+      }
+    },
+    {
+      "week": 3,
+      "scores": {
+        "diesel": 100.84,
+        "dracarys": 118.46,
+        "baker-s-dirty-dozen": 77.67,
+        "rey-del-norte": 105.92,
+        "code-brown": 70.82,
+        "ruly-s-big-tymers": 83.18,
+        "double-taylor-gators": 86.97,
+        "the-killer-ps": 89.35,
+        "g-o-a-t-6x-champ": 101.46,
+        "eat-meat": 124.3
+      }
+    }
   ]
 }

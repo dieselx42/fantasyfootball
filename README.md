@@ -280,6 +280,12 @@ Everything below is editable in the UI (**League** tab) and lives in
   // fixtures here and the standings match the site exactly.
   "schedule": [
     { "week": 1, "games": [{ "home": "diesel", "away": "code-brown" }] }
+  ],
+  // Optional. Final scores for weeks already played. Scores entered in the app
+  // or synced from the platform override these, team by team, so this is a
+  // baseline that survives a reset database or a second deployment.
+  "results": [
+    { "week": 1, "scores": { "diesel": 80.33, "code-brown": 77.08 } }
   ]
 }
 ```

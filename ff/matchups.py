@@ -83,6 +83,60 @@ def schedule(cfg: Mapping[str, Any]) -> list[dict[str, Any]]:
     return sorted(out, key=lambda e: e["week"])
 
 
+# --------------------------------------------------------------------------
+# Results
+# --------------------------------------------------------------------------
+
+def recorded_scores(
+    cfg: Mapping[str, Any],
+    stored: Mapping[int, Mapping[str, float]] | None = None,
+) -> dict[int, dict[str, float]]:
+    """Final scores: the league file's results, with live entries on top.
+
+    Results belong in the league config for the same reason the schedule does.
+    They are settled facts about the season, they are worth reading in a diff,
+    and a config travels with the deploy — so a database that gets reset, or a
+    second instance brought up somewhere else, still knows the standings.
+
+    Anything recorded through the app or synced from the platform wins, team by
+    team and week by week, because it is the newer statement about the same
+    fact. Merging per team rather than per week matters while a week is still
+    being filled in: a config that has all ten scores does not get wiped by a
+    store that has two.
+    """
+    known = {t["id"] for t in cfg.get("teams") or []}
+    merged: dict[int, dict[str, float]] = {}
+
+    for entry in cfg.get("results") or []:
+        try:
+            week = int(entry.get("week"))
+        except (TypeError, ValueError):
+            continue
+        week_scores: dict[str, float] = {}
+        for team_id, points in (entry.get("scores") or {}).items():
+            if team_id not in known:
+                continue
+            try:
+                week_scores[team_id] = float(points)
+            except (TypeError, ValueError):
+                continue
+        if week_scores:
+            merged.setdefault(week, {}).update(week_scores)
+
+    for week, week_scores in (stored or {}).items():
+        try:
+            key = int(week)
+        except (TypeError, ValueError):
+            continue
+        for team_id, points in (week_scores or {}).items():
+            try:
+                merged.setdefault(key, {})[team_id] = float(points)
+            except (TypeError, ValueError):
+                continue
+
+    return merged
+
+
 def default_week(
     cfg: Mapping[str, Any], scores: Mapping[int, Mapping[str, float]]
 ) -> int:
